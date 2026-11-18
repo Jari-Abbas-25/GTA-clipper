@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+venv/
+env/
+
+# Project temporary and scratch data
+_research/
+temp/
+projects/
+*.wav
+*.part
+*.temp.*
+
+# Model weights
+models/
+
+# OS and IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

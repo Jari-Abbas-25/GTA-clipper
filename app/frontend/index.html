@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GTA Clipper — Free Local Gaming Highlight Clipper</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="logo-area">
+      <span class="logo-badge">GTA 6</span>
+      <span class="logo-title">GAMING HIGHLIGHT CLIPPER</span>
+    </div>
+
+    <div class="header-status">
+      <div class="status-pill" id="cpuStatusPill">
+        <span class="status-dot"></span>
+        <span id="cpuStatusText">Core i5 (CPU-First)</span>
+      </div>
+      <div class="status-pill" id="whisperStatusPill">
+        <span class="status-dot"></span>
+        <span>faster-whisper INT8</span>
+      </div>
+      <div class="status-pill" id="ollamaStatusPill">
+        <span class="status-dot warn" id="ollamaDot"></span>
+        <span id="ollamaStatusText">Ollama (Optional)</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn" id="btnOpenProjects">📁 Projects</button>
+      <button class="btn" id="btnOpenStorage">💾 Storage</button>
+      <button class="btn btn-primary" id="btnNewProject">+ New VOD</button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+
+    <!-- 1. SETUP / INPUT VIEW -->
+    <section id="setupView" class="view-section active">
+      <div class="setup-hero">
+        <h1>Clip Twitch VODs Automatically & Free</h1>
+        <p>100% local processing. Multi-signal detection (Audio Loudness Jumps + Twitch Chat Velocity + Laughter + Speech). Zero subscriptions.</p>
+
+        <div class="input-group">
+          <input type="text" id="vodUrlInput" class="text-input" placeholder="Paste Twitch VOD URL (e.g. https://www.twitch.tv/videos/123456789) or local video file path...">
+          <button class="btn btn-primary" id="btnStartIngest">Analyze VOD</button>
+        </div>
+
+        <div class="setup-divider"><span>OR QUICK LOCAL TEST</span></div>
+
+        <button class="btn" id="btnLoadSample">Load Sample Gaming Highlight</button>
+
+        <!-- Progress Card -->
+        <div id="progressCard" class="progress-container" style="display: none;">
+          <div class="progress-meta">
+            <span id="progressStepTitle">Downloading Twitch VOD & Chat...</span>
+            <span id="progressPercentText">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div id="progressBarFill" class="progress-bar-fill"></div>
+          </div>
+          <div id="progressMessage" style="font-size: 12px; color: var(--text-muted);">Initializing...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. HIGHLIGHTS REVIEW VIEW -->
+    <section id="highlightsView" class="view-section">
+      <div class="project-header-bar">
+        <div class="project-title-area">
+          <h2 id="currentProjectTitle">VOD Highlights</h2>
+          <div class="project-meta-chips">
+            <span class="meta-chip">⏱️ Duration: <b id="vodDurationText">--:--</b></span>
+            <span class="meta-chip">🔥 Candidates: <b id="candCountText">0</b></span>
+            <span class="meta-chip">🎬 Exports: <b id="exportCountText">0</b></span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-danger btn-sm" id="btnReanalyze">Re-Analyze</button>
+          <button class="btn btn-gold" id="btnEditTopHighlight">⚡ Edit Top Highlight</button>
+        </div>
+      </div>
+
+      <!-- Hype Map -->
+      <div class="hype-map-card">
+        <div class="hype-map-header">
+          <span>HYPE MAP (ENGAGEMENT WAVEFORM)</span>
+          <span style="color: var(--text-muted); font-size: 11px;">Chat Spikes + Audio Jumps + Laughter</span>
+        </div>
+        <div class="hype-map-canvas-container">
+          <canvas id="hypeMapCanvas"></canvas>
+        </div>
+      </div>
+
+      <!-- Candidates Grid -->
+      <h3 style="font-size: 16px; margin-bottom: 16px;">Detected Highlight Candidates</h3>
+      <div id="candidatesGrid" class="candidates-grid">
+        <!-- Rendered dynamically -->
+      </div>
+    </section>
+
+    <!-- 3. INTEGRATED 9:16 CANVAS EDITOR VIEW -->
+    <section id="editorView" class="view-section">
+      <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <button class="btn btn-sm" id="btnBackToHighlights">← Back to Highlights</button>
+          <h2 id="editorClipTitle" style="font-size: 18px; font-weight: 700;">Clip Editor (c01)</h2>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-sm" id="btnSaveClipSettings">💾 Save Settings</button>
+          <button class="btn btn-gold" id="btnExportClip">🚀 Export 1080x1920 MP4</button>
+        </div>
+      </div>
+
+      <div class="editor-layout">
+        <!-- Left: 9:16 Canvas Preview -->
+        <div class="preview-pane">
+          <h3>9:16 VERTICAL PREVIEW</h3>
+          <div class="canvas-wrapper">
+            <canvas id="editorCanvas" width="360" height="640"></canvas>
+            <div id="facecamOverlayBox" class="facecam-bounding-box">
+              <div class="facecam-handle nw handle"></div>
+              <div class="facecam-handle ne handle"></div>
+              <div class="facecam-handle sw handle"></div>
+              <div class="facecam-handle se handle"></div>
+            </div>
+          </div>
+          <div class="canvas-controls-bar">
+            <button class="btn btn-sm" id="btnCanvasPlayPause">⏯️ Play / Pause</button>
+            <button class="btn btn-sm" id="btnResetCanvasTime">⏮️ Start</button>
+          </div>
+        </div>
+
+        <!-- Center: Playback & Timeline Scrubber -->
+        <div class="center-pane">
+          <div class="playback-card">
+            <video id="sourceVideo" preload="metadata" playsinline></video>
+          </div>
+
+          <div class="timeline-card">
+            <div class="timeline-scrubber" id="timelineScrubber">
+              <div class="scrubber-track" id="scrubberTrack"></div>
+              <div class="scrubber-playhead" id="scrubberPlayhead"></div>
+            </div>
+
+            <div class="trim-controls-row">
+              <div>
+                <label class="field-label">Clip Start (seconds):</label>
+                <input type="number" id="trimStartInput" class="text-input" step="0.5" style="width: 100%;">
+                <div class="nudge-buttons">
+                  <button class="btn btn-sm" id="btnNudgeStartMinus1">-1s</button>
+                  <button class="btn btn-sm" id="btnNudgeStartPlus1">+1s</button>
+                </div>
+              </div>
+
+              <div>
+                <label class="field-label">Clip End (seconds):</label>
+                <input type="number" id="trimEndInput" class="text-input" step="0.5" style="width: 100%;">
+                <div class="nudge-buttons">
+                  <button class="btn btn-sm" id="btnNudgeEndMinus1">-1s</button>
+                  <button class="btn btn-sm" id="btnNudgeEndPlus1">+1s</button>
+                </div>
+              </div>
+            </div>
+
+            <div style="font-size: 13px; color: var(--text-muted); display: flex; justify-content: space-between;">
+              <span>Clip Duration: <b id="editorDurationText">30.0s</b></span>
+              <span>Current Time: <b id="editorCurrentTimeText">0.0s</b></span>
+            </div>
+          </div>
+
+          <!-- Transcript & Subtitles Box -->
+          <div class="timeline-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <label class="field-label" style="margin: 0;">Speech Transcription (faster-whisper INT8):</label>
+              <button class="btn btn-sm" id="btnTranscribeClip">🎙️ Transcribe This Clip</button>
+            </div>
+            <textarea id="editorTranscriptText" class="text-input" rows="3" style="width: 100%; font-size: 13px;" placeholder="Click 'Transcribe This Clip' to generate timestamped captions..."></textarea>
+          </div>
+        </div>
+
+        <!-- Right: Layout & Settings Controls -->
+        <div class="settings-pane">
+          <div class="settings-group">
+            <h4>📐 Layout Mode</h4>
+            <div class="layout-pill-selector">
+              <button class="layout-btn active" data-layout="split">Split-Screen</button>
+              <button class="layout-btn" data-layout="crop">9:16 Crop</button>
+              <button class="layout-btn" data-layout="fit">Blurred Fit</button>
+              <button class="layout-btn" data-layout="pip">Picture-in-Pic</button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h4>📷 Facecam Controls</h4>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Drag and resize the yellow box on the preview canvas to position streamer webcam.</p>
+            <button class="btn btn-sm" id="btnAutoDetectFacecam" style="width: 100%;">🎯 Auto-Detect Facecam</button>
+          </div>
+
+          <div class="settings-group">
+            <h4>🎮 Gameplay Framing</h4>
+            <label class="field-label">Horizontal Pan (Focus):</label>
+            <input type="range" id="panRangeInput" min="0" max="1" step="0.05" value="0.5" style="width: 100%; margin-bottom: 10px;">
+            <label class="field-label">Zoom Factor:</label>
+            <input type="range" id="zoomRangeInput" min="1.0" max="2.0" step="0.05" value="1.0" style="width: 100%;">
+          </div>
+
+          <div class="settings-group">
+            <h4>💬 Captions & Subtitles</h4>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+              <input type="checkbox" id="chkEnableCaptions" checked>
+              <label for="chkEnableCaptions" style="font-size: 13px;">Burn Subtitles into Clip</label>
+            </div>
+
+            <label class="field-label">Subtitle Style:</label>
+            <select id="selCaptionStyle" class="text-input" style="width: 100%; margin-bottom: 10px;">
+              <option value="bold">Bold TikTok (Gold Highlight)</option>
+              <option value="karaoke">Karaoke Animation</option>
+              <option value="clean">Clean Box</option>
+              <option value="minimal">Minimal</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Storage Modal -->
+  <div class="modal-backdrop" id="storageModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>💾 Storage & Cleanup Manager</h3>
+        <button class="btn btn-sm" id="btnCloseStorageModal">✕</button>
+      </div>
+      <div class="modal-body" id="storageModalBody">
+        <p style="color: var(--text-muted); margin-bottom: 16px;">GTA Clipper keeps your downloaded videos, cache, and exports organized cleanly.</p>
+        <div id="storageStatsArea" style="background: var(--bg-primary); padding: 14px; border-radius: 8px; margin-bottom: 20px;">
+          <!-- Injected via JS -->
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button class="btn" id="btnCleanCache">🧹 Clean Temporary Analysis Cache</button>
+          <button class="btn btn-danger" id="btnDeleteSource">🗑️ Delete Source Video (Preserve Exports)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Projects Modal -->
+  <div class="modal-backdrop" id="projectsModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>📁 Existing Projects</h3>
+        <button class="btn btn-sm" id="btnCloseProjectsModal">✕</button>
+      </div>
+      <div class="modal-body" id="projectsListBody">
+        <!-- Injected via JS -->
+      </div>
+    </div>
+  </div>
+
+  <script src="canvas_editor.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
