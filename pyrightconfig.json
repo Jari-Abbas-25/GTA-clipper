@@ -1,0 +1,13 @@
+{
+  "include": [
+    "app",
+    "tests",
+    "run.py"
+  ],
+  "extraPaths": [
+    "C:/Users/Dell/AppData/Roaming/Python/Python313/site-packages",
+    "C:/Python313/Lib/site-packages",
+    "."
+  ],
+  "reportMissingImports": false
+}

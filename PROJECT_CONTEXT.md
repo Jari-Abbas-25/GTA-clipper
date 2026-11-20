@@ -108,6 +108,16 @@ e:\jari\Python\gta clipper\
    - [x] Tested `/api/projects/{id}/clips/{id}/render`: successfully rendered `c01_GTA_6_Crazy_Moment.mp4` via the API endpoint.
    - Result: **ALL FASTAPI ROUTES PASSED WITH STATUS CODE 200**.
 
+## Server.py Error Resolution & Hardening
+- **Direct Execution Support**: Added top-level package context resolution and `if __name__ == "__main__":` entrypoint so `server.py` can be launched directly via `python app/backend/server.py` or `python server.py` without throwing `ImportError: attempted relative import with no known parent package`.
+- **Pydantic Compatibility**: Implemented `_model_to_dict()` helper supporting both Pydantic v1 (`.dict()`) and v2 (`.model_dump()`), filtering `None` values and avoiding `PydanticDeprecatedSince20` warnings.
+- **Robust Route Handlers**:
+  - `trigger_render_clip` and `cleanup_project_storage`: Made request bodies optional (`req | None = None`) to prevent HTTP 422 Unprocessable Entity errors when called with empty or omitted JSON payloads.
+  - `stream_source_video`: Added HTTP 416 (Range Not Satisfiable) protection for out-of-bounds byte ranges during timeline seeking.
+  - `transcribe_clip`: Added pre-extraction verification ensuring source video presence before WAV conversion.
+  - Subtitle parsing in rendering: Hardened `SubtitleSegment` and `WordTiming` reconstruction with explicit dictionary validation and numeric casting.
+  - Sample Demo Shortcut: Added automatic mapping for `sample` URL input to the built-in demo VOD (`GTA_6_Heist___Cop_Chase_Highlights/source.mp4`).
+
 ## Current Working State
 Fully functional, fully local, tested application with complete backend, frontend, models, and demo project.
 
