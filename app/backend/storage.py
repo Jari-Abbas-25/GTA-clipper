@@ -35,14 +35,25 @@ class ProjectMeta:
     duration: float
     created_at: str
     status: str  # "created", "downloading", "analyzing", "ready", "error"
+    platform: str = "twitch"  # "twitch", "youtube", "local"
+    video_id: str | None = None
     is_local: bool = False
+    chat_status: str = "unavailable"  # "downloaded", "unavailable", "failed"
+    chat_message_count: int = 0
+    ai_provider: str = "heuristics"
     facecam_region: dict | None = None
 
 
 class Project:
-    def __init__(self, project_id: str):
+    def __init__(
+        self,
+        project_id: str,
+        base_dir: Path | None = None,
+        export_base_dir: Path | None = None,
+    ):
         self.id = project_id
-        self.dir = PROJECTS_DIR / project_id
+        self.base_dir = base_dir or PROJECTS_DIR
+        self.dir = self.base_dir / project_id
         self.dir.mkdir(parents=True, exist_ok=True)
         self.cache_dir = self.dir / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -54,7 +65,7 @@ class Project:
         self.chat_path = self.dir / "chat.json"
         self.meta_path = self.dir / "meta.json"
         self.highlights_path = self.dir / "highlights.json"
-        self.export_dir = EXPORTS_DIR / project_id
+        self.export_dir = (export_base_dir / project_id) if export_base_dir else (EXPORTS_DIR / project_id)
         self.export_dir.mkdir(parents=True, exist_ok=True)
 
     def load_meta(self) -> dict:
@@ -180,7 +191,12 @@ def sanitize_project_id(title_or_id: str) -> str:
     return slug[:50] or f"project_{int(datetime.now().timestamp())}"
 
 
-def create_project(title: str, url_or_path: str) -> Project:
+def create_project(
+    title: str,
+    url_or_path: str,
+    platform: str = "twitch",
+    video_id: str | None = None,
+) -> Project:
     pid = sanitize_project_id(title)
     # Ensure uniqueness
     candidate_id = pid
@@ -194,11 +210,45 @@ def create_project(title: str, url_or_path: str) -> Project:
         "id": candidate_id,
         "title": title,
         "source_url_or_path": url_or_path,
+        "platform": platform,
+        "video_id": video_id,
         "duration": 0.0,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "created",
-        "is_local": Path(url_or_path).is_file()
+        "is_local": Path(url_or_path).is_file(),
+        "chat_status": "pending",
+        "chat_message_count": 0,
+        "ai_provider": "heuristics",
     }
+    proj.save_meta(meta)
+    return proj
+
+
+def create_demo_project() -> Project:
+    """Explicitly create a demo project by copying from tests/fixtures/sample_project.
+    
+    ONLY invoked when user explicitly clicks 'Try Offline Demo'. Never runs automatically.
+    """
+    from .config import FIXTURES_DIR
+    fixture_dir = FIXTURES_DIR / "sample_project"
+    if not fixture_dir.is_dir():
+        raise RuntimeError("Demo fixtures not found in tests/fixtures/sample_project")
+
+    title = "GTA 6 Heist & Cop Chase Highlights (Demo)"
+    proj = create_project(title, "demo://sample_gta6_heist", platform="local", video_id="demo_vod")
+
+    # Copy files from fixture
+    for item in fixture_dir.iterdir():
+        dest = proj.dir / item.name
+        if item.is_file():
+            shutil.copy2(item, dest)
+        elif item.is_dir():
+            shutil.copytree(item, dest, dirs_exist_ok=True)
+
+    meta = proj.load_meta()
+    meta["title"] = title
+    meta["status"] = "ready"
+    meta["is_demo"] = True
     proj.save_meta(meta)
     return proj
 

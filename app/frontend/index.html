@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GTA Clipper — Free Local Gaming Highlight Clipper</title>
+  <title>GTA Clipper — Multi-Platform Gaming Highlight Clipper</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -16,21 +16,22 @@
     </div>
 
     <div class="header-status">
-      <div class="status-pill" id="cpuStatusPill">
+      <div class="status-pill" id="cpuStatusPill" title="Local CPU hardware info">
         <span class="status-dot"></span>
         <span id="cpuStatusText">Core i5 (CPU-First)</span>
       </div>
-      <div class="status-pill" id="whisperStatusPill">
+      <div class="status-pill" id="whisperStatusPill" title="Local INT8 speech transcription">
         <span class="status-dot"></span>
-        <span>faster-whisper INT8</span>
+        <span>Whisper INT8</span>
       </div>
-      <div class="status-pill" id="ollamaStatusPill">
-        <span class="status-dot warn" id="ollamaDot"></span>
-        <span id="ollamaStatusText">Ollama (Optional)</span>
+      <div class="status-pill clickable" id="aiStatusPill" title="Click to configure AI Provider (Ollama / DeepSeek / OpenRouter)">
+        <span class="status-dot warn" id="aiDot"></span>
+        <span id="aiStatusText">AI: Loading...</span>
       </div>
     </div>
 
     <div class="header-actions">
+      <button class="btn" id="btnAiSettings">⚡ AI Settings</button>
       <button class="btn" id="btnOpenProjects">📁 Projects</button>
       <button class="btn" id="btnOpenStorage">💾 Storage</button>
       <button class="btn btn-primary" id="btnNewProject">+ New VOD</button>
@@ -40,31 +41,61 @@
   <!-- Main Container -->
   <main class="main-container">
 
-    <!-- 1. SETUP / INPUT VIEW -->
+    <!-- 1. SETUP / DASHBOARD VIEW -->
     <section id="setupView" class="view-section active">
       <div class="setup-hero">
-        <h1>Clip Twitch VODs Automatically & Free</h1>
-        <p>100% local processing. Multi-signal detection (Audio Loudness Jumps + Twitch Chat Velocity + Laughter + Speech). Zero subscriptions.</p>
+        <h1>Free Local Gaming Highlight Clipper</h1>
+        <p>Supports <strong>Twitch VODs</strong> and <strong>YouTube Videos / Streams</strong>. Multi-signal detection (Audio Loudness Jumps + Chat Replay Dynamics + Laughter + Speech Recognition). Zero subscriptions or mandatory APIs.</p>
 
-        <div class="input-group">
-          <input type="text" id="vodUrlInput" class="text-input" placeholder="Paste Twitch VOD URL (e.g. https://www.twitch.tv/videos/123456789) or local video file path...">
-          <button class="btn btn-primary" id="btnStartIngest">Analyze VOD</button>
+        <!-- Input Bar with Live Platform Badge -->
+        <div class="input-card">
+          <div class="input-group">
+            <span class="platform-indicator" id="platformBadge">Detecting URL...</span>
+            <input type="text" id="vodUrlInput" class="text-input" placeholder="Paste a Twitch VOD or YouTube video URL (e.g. https://www.twitch.tv/videos/... or https://youtu.be/...)...">
+            <button class="btn btn-primary" id="btnStartIngest">Analyze & Clip</button>
+          </div>
+
+          <!-- Video Preview Card (Populated upon validation) -->
+          <div id="videoPreviewCard" class="video-preview-card" style="display: none;">
+            <img id="previewThumbnail" class="preview-thumb" src="" alt="Thumbnail">
+            <div class="preview-info">
+              <div class="preview-title" id="previewTitle">Video Title</div>
+              <div class="preview-meta">
+                <span id="previewUploader">Channel</span> • 
+                <span id="previewDuration">0:00</span> • 
+                <span id="previewPlatformBadge" class="tag">Twitch</span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="setup-divider"><span>OR QUICK LOCAL TEST</span></div>
+        <div class="setup-divider"><span>OR OFFLINE DEMONSTRATION</span></div>
 
-        <button class="btn" id="btnLoadSample">Load Sample Gaming Highlight</button>
+        <div style="display: flex; justify-content: center; margin-bottom: 24px;">
+          <button class="btn" id="btnLoadSample">🧪 Try Offline Demo Highlight (Sample Project)</button>
+        </div>
 
-        <!-- Progress Card -->
+        <!-- Ingestion Progress Card -->
         <div id="progressCard" class="progress-container" style="display: none;">
           <div class="progress-meta">
-            <span id="progressStepTitle">Downloading Twitch VOD & Chat...</span>
+            <span id="progressStepTitle">Ingesting Video & Chat...</span>
             <span id="progressPercentText">0%</span>
           </div>
           <div class="progress-bar-bg">
             <div id="progressBarFill" class="progress-bar-fill"></div>
           </div>
-          <div id="progressMessage" style="font-size: 12px; color: var(--text-muted);">Initializing...</div>
+          <div id="progressMessage" style="font-size: 13px; color: var(--text-muted); margin-top: 6px;">Initializing...</div>
+        </div>
+
+        <!-- Dashboard User Projects Area -->
+        <div class="dashboard-projects-section">
+          <div class="section-header">
+            <h3>Recent User Projects</h3>
+            <span style="font-size: 13px; color: var(--text-muted);">Stored locally in projects/</span>
+          </div>
+          <div id="dashboardProjectsArea">
+            <!-- Dynamically populated or empty state shown -->
+          </div>
         </div>
       </div>
     </section>
@@ -73,11 +104,16 @@
     <section id="highlightsView" class="view-section">
       <div class="project-header-bar">
         <div class="project-title-area">
-          <h2 id="currentProjectTitle">VOD Highlights</h2>
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+            <span class="tag" id="highlightPlatformTag">Twitch</span>
+            <h2 id="currentProjectTitle">VOD Highlights</h2>
+          </div>
           <div class="project-meta-chips">
             <span class="meta-chip">⏱️ Duration: <b id="vodDurationText">--:--</b></span>
+            <span class="meta-chip">💬 Chat: <b id="chatStatusText">Analyzing</b></span>
             <span class="meta-chip">🔥 Candidates: <b id="candCountText">0</b></span>
             <span class="meta-chip">🎬 Exports: <b id="exportCountText">0</b></span>
+            <span class="meta-chip">⚡ Evaluator: <b id="aiProviderUsedText">Heuristics</b></span>
           </div>
         </div>
         <div style="display: flex; gap: 10px;">
@@ -86,11 +122,11 @@
         </div>
       </div>
 
-      <!-- Hype Map -->
+      <!-- Hype Map (Engagement Waveform) -->
       <div class="hype-map-card">
         <div class="hype-map-header">
           <span>HYPE MAP (ENGAGEMENT WAVEFORM)</span>
-          <span style="color: var(--text-muted); font-size: 11px;">Chat Spikes + Audio Jumps + Laughter</span>
+          <span style="color: var(--text-muted); font-size: 11px;">Audio Loudness Dynamics + Chat Spikes + Laughter Events</span>
         </div>
         <div class="hype-map-canvas-container">
           <canvas id="hypeMapCanvas"></canvas>
@@ -113,7 +149,19 @@
         </div>
         <div style="display: flex; gap: 10px;">
           <button class="btn btn-sm" id="btnSaveClipSettings">💾 Save Settings</button>
-          <button class="btn btn-gold" id="btnExportClip">🚀 Export 1080x1920 MP4</button>
+          <button class="btn btn-gold" id="btnExportClip">🚀 Render 1080x1920 MP4</button>
+        </div>
+      </div>
+
+      <!-- Export Success Bar with Save As & Download actions -->
+      <div id="exportSuccessBar" class="export-success-box" style="display: none;">
+        <div class="export-success-info">
+          <span>🎉 <strong>Render Complete!</strong> <span id="exportedFilename">clip.mp4</span> (<span id="exportedSize">0 MB</span>)</span>
+          <div id="exportSavedPathText" style="font-size: 11px; color: var(--accent-green); margin-top: 2px;"></div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-primary btn-sm" id="btnSaveAsNative">💾 Save As (Choose Folder)</button>
+          <a class="btn btn-sm" id="btnDownloadExport" href="#" download>⬇️ Download MP4</a>
         </div>
       </div>
 
@@ -231,6 +279,105 @@
 
   </main>
 
+  <!-- AI Settings Modal -->
+  <div class="modal-backdrop" id="aiSettingsModal">
+    <div class="modal-dialog" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>⚡ AI Provider & Evaluator Settings</h3>
+        <button class="btn btn-sm" id="btnCloseAiModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text-muted); margin-bottom: 16px; font-size: 13px;">
+          Choose whether highlight moments are evaluated using your local machine (Ollama / offline heuristics) or an external API (DeepSeek / OpenRouter).
+        </p>
+
+        <!-- Mode Selector Tabs -->
+        <div class="tab-selector" style="margin-bottom: 18px;">
+          <button class="tab-btn active" id="tabBtnLocalAi">🖥️ OPTION A: LOCAL AI</button>
+          <button class="tab-btn" id="tabBtnApiAi">🌐 OPTION B: API AI</button>
+        </div>
+
+        <!-- Tab A: Local AI -->
+        <div id="tabContentLocalAi" class="tab-content active">
+          <div style="background: var(--bg-card); padding: 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <strong>Ollama Daemon Status:</strong>
+              <span id="ollamaStatusBadge" class="tag">Checking...</span>
+            </div>
+            <label class="field-label">Ollama Host URL:</label>
+            <input type="text" id="aiOllamaUrlInput" class="text-input" value="http://localhost:11434" style="width: 100%; margin-bottom: 10px;">
+
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label class="field-label">Selected Model:</label>
+              <button class="btn btn-sm" id="btnRefreshOllamaModels" style="padding: 2px 8px; font-size: 11px;">↻ Refresh</button>
+            </div>
+            <select id="selOllamaModel" class="text-input" style="width: 100%; margin-bottom: 8px;">
+              <option value="">(No models found)</option>
+            </select>
+            <div style="font-size: 12px; color: var(--text-muted);">
+              Recommended for Core i5: <code>llama3.2:3b</code> or <code>qwen2.5:3b</code>.
+            </div>
+          </div>
+
+          <div style="background: var(--bg-primary); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+            🛡️ <strong>Built-in CPU-first Local ML Stack:</strong><br>
+            • <code>faster-whisper INT8</code>: Speech recognition on candidate clips (90%+ CPU saved)<br>
+            • <code>sherpa-onnx / CED-mini</code>: Audio event tagging (laughter, shouting, cheering)<br>
+            • <strong>Heuristics Fallback</strong>: If Ollama is offline or uninstalled, the app automatically ranks highlights via audio dynamics and chat velocity with zero errors.
+          </div>
+        </div>
+
+        <!-- Tab B: API AI -->
+        <div id="tabContentApiAi" class="tab-content" style="display: none;">
+          <div style="margin-bottom: 12px;">
+            <label class="field-label">Select API Provider:</label>
+            <select id="selApiProvider" class="text-input" style="width: 100%;">
+              <option value="deepseek">DeepSeek API (api.deepseek.com)</option>
+              <option value="openrouter">OpenRouter API (openrouter.ai)</option>
+            </select>
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label class="field-label">API Base URL:</label>
+              <button class="btn btn-sm" id="btnResetApiUrl" style="padding: 2px 8px; font-size: 11px;">Reset Default</button>
+            </div>
+            <input type="text" id="aiApiUrlInput" class="text-input" value="https://api.deepseek.com/v1" style="width: 100%;">
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <label class="field-label">Model Name:</label>
+            <input type="text" id="aiApiModelInput" class="text-input" value="deepseek-chat" style="width: 100%;">
+            <div id="apiModelHint" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+              Default: <code>deepseek-chat</code> (or <code>meta-llama/llama-3.2-3b-instruct:free</code> on OpenRouter)
+            </div>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label class="field-label">API Key:</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="password" id="aiApiKeyInput" class="text-input" placeholder="sk-..." style="flex: 1;">
+              <button class="btn btn-sm" id="btnToggleApiKey">👁️</button>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+              🔒 Keys are stored securely in local <code>.ai_config.json</code> on this machine only, never committed to Git.
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; background: var(--bg-card); padding: 10px; border-radius: 8px;">
+            <button class="btn btn-sm" id="btnTestAiConnection">🔌 Test API Connection</button>
+            <span id="aiTestResult" style="font-size: 12px; color: var(--text-muted);">Not tested yet</span>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px;">
+          <button class="btn" id="btnCancelAiModal">Cancel</button>
+          <button class="btn btn-primary" id="btnSaveAiConfig">Save AI Settings</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Storage Modal -->
   <div class="modal-backdrop" id="storageModal">
     <div class="modal-dialog">
@@ -253,7 +400,7 @@
 
   <!-- Projects Modal -->
   <div class="modal-backdrop" id="projectsModal">
-    <div class="modal-dialog">
+    <div class="modal-dialog" style="max-width: 650px;">
       <div class="modal-header">
         <h3>📁 Existing Projects</h3>
         <button class="btn btn-sm" id="btnCloseProjectsModal">✕</button>

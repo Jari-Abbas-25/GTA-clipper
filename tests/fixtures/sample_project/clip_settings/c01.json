@@ -1,0 +1,13 @@
+{
+  "layout": "split",
+  "facecam_x": 0.7,
+  "facecam_y": 0.05,
+  "facecam_w": 0.25,
+  "facecam_h": 0.3,
+  "start_s": 6.0,
+  "end_s": 18.0,
+  "enable_subtitles": true,
+  "subtitle_style": "bold",
+  "clip_title": "Chat Lost It! KEKW",
+  "segments": []
+}

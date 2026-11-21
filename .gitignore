@@ -10,10 +10,17 @@ env/
 # Project temporary and scratch data
 _research/
 temp/
+cache/
 projects/
+exports/
+tests/scratch/
 *.wav
 *.part
 *.temp.*
+
+# AI configuration & credentials (NEVER commit API keys)
+.ai_config.json
+.env.local
 
 # Model weights
 models/

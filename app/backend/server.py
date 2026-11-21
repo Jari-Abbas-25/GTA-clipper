@@ -1,12 +1,14 @@
 """FastAPI Backend Server for GTA Clipper.
 
 Provides REST and streaming endpoints for:
-- Twitch VOD & Chat downloading
+- Multi-Platform Video & Chat downloading (Twitch, YouTube, Local)
 - Multi-signal highlight detection & Hype Map
 - Video streaming with HTTP Range requests
 - Candidate-window faster-whisper transcription
 - Real-time 9:16 Canvas editor state persistence
 - FFmpeg 1080x1920 vertical MP4 export
+- Native Windows Save As dialog & direct file saving
+- First-launch AI Provider configuration & connectivity testing (Ollama, DeepSeek, OpenRouter, Heuristics)
 - Storage management & cleanup
 """
 
@@ -15,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -46,13 +49,28 @@ try:
 except ImportError:
     cv2 = None  # type: ignore
 
-from .ai_evaluator import is_ollama_available
+from .ai_evaluator import (
+    get_ollama_status,
+    is_ollama_available,
+    load_ai_config,
+    save_ai_config,
+    test_ai_connection,
+)
 from .audio_signals import extract_audio_wav
 from .config import CPU_CORES, EXPORTS_DIR, FRONTEND_DIR, IS_WINDOWS, PROJECTS_DIR
 from .facecam_detector import detect_facecam, extract_frame_image
 from .highlight_engine import run_highlight_detection
 from .renderer import RenderOptions, render_clip
-from .storage import Project, create_project, list_all_projects
+from .sources import (
+    BaseSource,
+    ChatResult,
+    ChatStatus,
+    Platform,
+    VideoMetadata,
+    detect_platform,
+    get_source,
+)
+from .storage import Project, create_demo_project, create_project, list_all_projects
 from .transcriber import (
     FASTER_WHISPER_AVAILABLE,
     SubtitleSegment,
@@ -60,14 +78,8 @@ from .transcriber import (
     generate_ass_subtitles,
     transcribe_window,
 )
-from .twitch_downloader import (
-    download_twitch_chat,
-    download_video,
-    extract_twitch_id,
-    probe_video_info,
-)
 
-app = FastAPI(title="GTA Clipper API", version="1.0.0")
+app = FastAPI(title="GTA Clipper API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,6 +100,14 @@ def _model_to_dict(req: BaseModel) -> dict[str, Any]:
     else:
         data = req.dict(exclude_unset=True)  # type: ignore[deprecated]
     return {k: v for k, v in data.items() if v is not None}
+
+
+# ============================================================================
+# Request Models
+# ============================================================================
+
+class ProbeRequest(BaseModel):
+    url_or_path: str
 
 
 class CreateProjectRequest(BaseModel):
@@ -121,9 +141,39 @@ class CleanupRequest(BaseModel):
     delete_cache: bool = True
 
 
+class AiConfigRequest(BaseModel):
+    mode: str | None = None
+    provider: str | None = None
+    ollama_url: str | None = None
+    ollama_model: str | None = None
+    deepseek_url: str | None = None
+    deepseek_model: str | None = None
+    deepseek_key: str | None = None
+    openrouter_url: str | None = None
+    openrouter_model: str | None = None
+    openrouter_key: str | None = None
+
+
+class AiTestRequest(BaseModel):
+    provider: str
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+
+
+class SaveToPathRequest(BaseModel):
+    destination_path: str
+    overwrite: bool = False
+
+
+# ============================================================================
+# System & AI Endpoints
+# ============================================================================
+
 @app.get("/api/status")
 def get_system_status():
     ollama_ok, ollama_model = is_ollama_available()
+    ai_cfg = load_ai_config()
     return {
         "status": "online",
         "platform": "windows" if IS_WINDOWS else "other",
@@ -132,13 +182,81 @@ def get_system_status():
         "whisper_available": FASTER_WHISPER_AVAILABLE,
         "ollama_available": ollama_ok,
         "ollama_model": ollama_model,
+        "ai_mode": ai_cfg.get("mode", "local"),
+        "ai_provider": ai_cfg.get("provider", "ollama"),
         "projects_dir": str(PROJECTS_DIR.resolve()),
         "exports_dir": str(EXPORTS_DIR.resolve()),
     }
 
 
+@app.get("/api/ai/config")
+def get_ai_configuration():
+    """Retrieve active AI settings with masked keys."""
+    return load_ai_config()
+
+
+@app.post("/api/ai/config")
+def update_ai_configuration(req: AiConfigRequest):
+    """Update AI mode, provider, endpoints, or keys."""
+    updates = _model_to_dict(req)
+    updated = save_ai_config(updates)
+    return {"status": "saved", "config": updated}
+
+
+@app.get("/api/ai/ollama/models")
+def list_ollama_models(url: str = Query(None)):
+    """Retrieve installed models from local Ollama instance."""
+    ok, models, recommended = get_ollama_status(url)
+    return {
+        "online": ok,
+        "models": models,
+        "recommended": recommended,
+    }
+
+
+@app.post("/api/ai/test")
+def test_provider_connection(req: AiTestRequest):
+    """Test connection with specified AI provider."""
+    return test_ai_connection(
+        provider=req.provider,
+        api_key=req.api_key,
+        base_url=req.base_url,
+        model=req.model,
+    )
+
+
+# ============================================================================
+# Video Ingestion & Project Endpoints
+# ============================================================================
+
+@app.post("/api/probe")
+def probe_video_endpoint(req: ProbeRequest):
+    """Inspect and validate a Twitch or YouTube URL, or local video path."""
+    url = req.url_or_path.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL or file path is required")
+
+    try:
+        source, platform, vid_id = get_source(url)
+        meta = source.probe(url)
+        return {
+            "id": meta.id,
+            "title": meta.title,
+            "duration": meta.duration,
+            "uploader": meta.uploader,
+            "thumbnail": meta.thumbnail,
+            "platform": meta.platform.value,
+            "webpage_url": meta.webpage_url,
+            "is_local": meta.is_local,
+            "is_live": meta.is_live,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to probe video: {e}")
+
+
 @app.get("/api/projects")
 def get_projects():
+    """List genuine user projects only (empty if none exist)."""
     return list_all_projects()
 
 
@@ -148,28 +266,29 @@ def create_new_project(req: CreateProjectRequest, background_tasks: BackgroundTa
     if not url_or_path:
         raise HTTPException(status_code=400, detail="URL or file path is required")
 
-    # Support sample demo shortcut
-    if "sample" in url_or_path.lower():
-        sample_path = PROJECTS_DIR / "GTA_6_Heist___Cop_Chase_Highlights" / "source.mp4"
-        if sample_path.is_file():
-            url_or_path = str(sample_path.resolve())
+    source, platform, vid_id = get_source(url_or_path)
 
     try:
-        info = probe_video_info(url_or_path)
+        info = source.probe(url_or_path)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to probe video: {e}")
 
-    title = req.title or info.get("title") or "Gaming VOD"
-    proj = create_project(title, url_or_path)
+    title = req.title or info.title or "Gaming VOD"
+    proj = create_project(
+        title=title,
+        url_or_path=url_or_path,
+        platform=platform.value,
+        video_id=vid_id or info.id,
+    )
 
     # Initialize job progress
     _job_progress[proj.id] = {
         "step": "queued",
         "percent": 0.0,
-        "message": "Queued for download...",
+        "message": f"Queued for {platform.value.capitalize()} download...",
     }
 
-    def _download_task(p_id: str, source: str, duration: float | None):
+    def _download_task(p_id: str, src_url: str, duration: float | None):
         project = Project(p_id)
         meta = project.load_meta()
         try:
@@ -177,7 +296,7 @@ def create_new_project(req: CreateProjectRequest, background_tasks: BackgroundTa
             _job_progress[p_id] = {
                 "step": "download_video",
                 "percent": 5.0,
-                "message": "Downloading video...",
+                "message": f"Downloading {platform.value.capitalize()} video streams...",
             }
 
             def _v_prog(pct):
@@ -187,35 +306,40 @@ def create_new_project(req: CreateProjectRequest, background_tasks: BackgroundTa
                     "message": f"Downloading video: {pct:.1f}%",
                 }
 
-            download_video(source, project.source_video, on_progress=_v_prog)
+            source.download_video(src_url, project.source_video, on_progress=_v_prog)
 
-            # 2. Download Twitch chat if applicable
-            twitch_id = extract_twitch_id(source)
-            if twitch_id:
+            # 2. Download chat replay
+            _job_progress[p_id] = {
+                "step": "download_chat",
+                "percent": 75.0,
+                "message": f"Retrieving {platform.value.capitalize()} chat replay...",
+            }
+
+            def _c_prog(pct, count):
                 _job_progress[p_id] = {
                     "step": "download_chat",
-                    "percent": 75.0,
-                    "message": "Downloading Twitch chat replay...",
+                    "percent": round(75.0 + pct * 0.2, 1),
+                    "message": f"Downloading chat ({count} msgs)...",
                 }
 
-                def _c_prog(pct, count):
-                    _job_progress[p_id] = {
-                        "step": "download_chat",
-                        "percent": round(75.0 + pct * 0.2, 1),
-                        "message": f"Downloading Twitch chat ({count} msgs)...",
-                    }
-
-                download_twitch_chat(
-                    twitch_id, project.chat_path, duration=duration, on_progress=_c_prog
-                )
+            chat_res: ChatResult = source.download_chat(
+                vid_id or p_id,
+                project.chat_path,
+                duration=duration,
+                on_progress=_c_prog,
+            )
 
             meta["status"] = "downloaded"
-            meta["duration"] = duration or 0.0
+            meta["duration"] = duration or meta.get("duration", 0.0)
+            meta["chat_status"] = chat_res.status.value
+            meta["chat_message_count"] = chat_res.message_count
+            meta["chat_detail"] = chat_res.detail
             project.save_meta(meta)
+
             _job_progress[p_id] = {
                 "step": "ready_for_analysis",
                 "percent": 100.0,
-                "message": "Download complete! Ready for analysis.",
+                "message": f"Download complete! ({chat_res.detail}) Ready for highlight detection.",
             }
         except Exception as err:
             meta["status"] = "error"
@@ -224,11 +348,22 @@ def create_new_project(req: CreateProjectRequest, background_tasks: BackgroundTa
             _job_progress[p_id] = {
                 "step": "error",
                 "percent": 0.0,
-                "message": f"Error: {err}",
+                "message": f"Download failed: {err}",
             }
 
-    background_tasks.add_task(_download_task, proj.id, url_or_path, info.get("duration"))
-    return {"project_id": proj.id, "title": title}
+    background_tasks.add_task(_download_task, proj.id, url_or_path, info.duration)
+    return {"project_id": proj.id, "title": title, "platform": platform.value}
+
+
+@app.post("/api/projects/create-demo")
+def create_demo_project_endpoint():
+    """Explicitly create an offline demo project from tests/fixtures. Never runs automatically."""
+    try:
+        proj = create_demo_project()
+        meta = proj.load_meta()
+        return {"project_id": proj.id, "title": meta.get("title", "Demo Project")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create demo project: {e}")
 
 
 @app.get("/api/projects/{project_id}")
@@ -277,7 +412,7 @@ def analyze_project(project_id: str, background_tasks: BackgroundTasks):
     _job_progress[project_id] = {
         "step": "extract_audio",
         "percent": 10.0,
-        "message": "Extracting audio for analysis...",
+        "message": "Extracting 16kHz audio for dynamics analysis...",
     }
 
     def _analysis_task(p_id: str):
@@ -292,10 +427,11 @@ def analyze_project(project_id: str, background_tasks: BackgroundTasks):
                 "message": "Analyzing audio dynamics and chat spikes...",
             }
 
-            # 2. Run multi-signal detection
+            # 2. Run multi-signal detection (passes chat if available and has messages)
+            has_valid_chat = project.chat_path.is_file() and project.chat_path.stat().st_size > 30
             result = run_highlight_detection(
                 wav_path=project.audio_path,
-                chat_path=project.chat_path if project.chat_path.is_file() else None,
+                chat_path=project.chat_path if has_valid_chat else None,
                 top_n=15,
             )
 
@@ -303,7 +439,7 @@ def analyze_project(project_id: str, background_tasks: BackgroundTasks):
             _job_progress[p_id] = {
                 "step": "detecting_facecam",
                 "percent": 85.0,
-                "message": "Detecting streamer webcam region...",
+                "message": "Scanning video frames for streamer webcam...",
             }
             fc_region = detect_facecam(project.source_video, result.duration)
             if fc_region:
@@ -434,7 +570,6 @@ def transcribe_clip(project_id: str, clip_id: str):
     if not cand:
         raise HTTPException(status_code=404, detail="Clip candidate not found")
 
-    # Use custom start/end if saved by user
     setting = proj.load_clip_setting(clip_id) or {}
     start_s = float(setting.get("start_s", cand["start"]))
     end_s = float(setting.get("end_s", cand["end"]))
@@ -451,7 +586,6 @@ def transcribe_clip(project_id: str, clip_id: str):
         model_size="tiny",
     )
 
-    # Save transcription to clip setting
     setting["segments"] = [asdict(s) for s in segments]
     setting["full_text"] = " ".join(s.text for s in segments)
     proj.save_clip_setting(clip_id, setting)
@@ -468,7 +602,6 @@ def get_clip_setting(project_id: str, clip_id: str):
     proj = Project(project_id)
     setting = proj.load_clip_setting(clip_id)
     if not setting:
-        # Default settings based on candidate and project facecam
         meta = proj.load_meta()
         highlights = proj.load_highlights() or {}
         cand = next((c for c in highlights.get("candidates", []) if c["id"] == clip_id), None)
@@ -531,7 +664,6 @@ def trigger_render_clip(
         or clip_id
     )
 
-    # Sanitize title for filename
     clean_title = "".join(c for c in clip_title if c.isalnum() or c in " _-").strip().replace(
         " ", "_"
     )
@@ -543,7 +675,6 @@ def trigger_render_clip(
     if setting.get("enable_subtitles", True):
         segments_data = setting.get("segments")
         if not segments_data and proj.audio_path.is_file():
-            # Transcribe now if not done yet
             try:
                 segments_obj = transcribe_window(
                     proj.audio_path, start_s, end_s, model_size="tiny"
@@ -565,12 +696,15 @@ def trigger_render_clip(
                         end=float(w.get("end", 0.0)),
                         word=str(w.get("word", "")),
                     )
+                    # pyrefly: ignore[not-iterable]
                     for w in sd.get("words", [])
                     if isinstance(w, dict)
                 ]
                 reconstructed_segs.append(
                     SubtitleSegment(
+                        # pyrefly: ignore[bad-argument-type]
                         start=float(sd.get("start", 0.0)),
+                        # pyrefly: ignore[bad-argument-type]
                         end=float(sd.get("end", 0.0)),
                         text=str(sd.get("text", "")),
                         words=words,
@@ -642,6 +776,114 @@ def trigger_render_clip(
     }
 
 
+# ============================================================================
+# Export & Save As Endpoints
+# ============================================================================
+
+@app.post("/api/exports/{project_id}/{clip_id}/save-dialog")
+def open_native_save_dialog(project_id: str, clip_id: str):
+    """Open Windows native Save As dialog to save the rendered MP4 to a user-chosen location."""
+    proj = Project(project_id)
+    exports = proj.list_exports()
+
+    target_file = None
+    for exp in exports:
+        if exp["name"].startswith(f"{clip_id}_") or exp["name"].startswith(clip_id):
+            target_file = Path(exp["path"])
+            break
+
+    if not target_file or not target_file.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Rendered clip export not found. Please render the clip first before saving.",
+        )
+
+    meta = proj.load_meta()
+    clean_title = "".join(c for c in meta.get("title", "Clip") if c.isalnum() or c in " _-").strip().replace(" ", "_")
+    default_filename = f"{clean_title[:30]}_{clip_id}.mp4"
+
+    # Execute Tkinter dialog in an isolated subprocess to guarantee thread-safety and foreground window focus
+    script = f"""
+import sys
+import tkinter as tk
+from tkinter import filedialog
+
+root = tk.Tk()
+root.withdraw()
+root.attributes('-topmost', True)
+dest = filedialog.asksaveasfilename(
+    title='Save 9:16 Highlight Clip As',
+    initialfile={repr(default_filename)},
+    defaultextension='.mp4',
+    filetypes=[('MP4 Video', '*.mp4'), ('All Files', '*.*')]
+)
+root.destroy()
+if dest:
+    sys.stdout.write(dest)
+"""
+    try:
+        proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=90)
+        chosen_dest = proc.stdout.strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to open Save As dialog: {e}")
+
+    if not chosen_dest:
+        return {"status": "cancelled", "message": "Save As was cancelled."}
+
+    dest_path = Path(chosen_dest)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(target_file, dest_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to copy video to {dest_path}: {e}")
+
+    return {
+        "status": "saved",
+        "path": str(dest_path.resolve()),
+        "filename": dest_path.name,
+        "size_mb": round(dest_path.stat().st_size / (1024 * 1024), 2),
+    }
+
+
+@app.post("/api/exports/{project_id}/{clip_id}/save-to-path")
+def save_export_to_path(project_id: str, clip_id: str, req: SaveToPathRequest):
+    """Save rendered clip to an explicitly provided file path."""
+    proj = Project(project_id)
+    exports = proj.list_exports()
+
+    target_file = None
+    for exp in exports:
+        if exp["name"].startswith(f"{clip_id}_") or exp["name"].startswith(clip_id):
+            target_file = Path(exp["path"])
+            break
+
+    if not target_file or not target_file.is_file():
+        raise HTTPException(status_code=404, detail="Rendered clip export not found")
+
+    dest_path = Path(req.destination_path.strip())
+    if dest_path.is_dir():
+        dest_path = dest_path / target_file.name
+
+    if dest_path.is_file() and not req.overwrite:
+        raise HTTPException(
+            status_code=409,
+            detail=f"File already exists at {dest_path}. Confirm overwrite to replace.",
+        )
+
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(target_file, dest_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
+
+    return {
+        "status": "saved",
+        "path": str(dest_path.resolve()),
+        "filename": dest_path.name,
+        "size_mb": round(dest_path.stat().st_size / (1024 * 1024), 2),
+    }
+
+
 @app.post("/api/projects/{project_id}/cleanup")
 def cleanup_project_storage(project_id: str, req: CleanupRequest | None = None):
     if req is None:
@@ -652,12 +894,17 @@ def cleanup_project_storage(project_id: str, req: CleanupRequest | None = None):
 
 
 @app.get("/api/exports/{project_id}/{filename}")
-def download_export_clip(project_id: str, filename: str):
+def download_export_clip(project_id: str, filename: str, download: bool = False):
     proj = Project(project_id)
     path = proj.export_dir / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Exported file not found")
-    return FileResponse(path, media_type="video/mp4", filename=filename)
+
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+    return FileResponse(path, media_type="video/mp4", filename=filename, headers=headers)
 
 
 # Mount static frontend

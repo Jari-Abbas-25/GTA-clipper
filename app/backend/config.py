@@ -15,9 +15,11 @@ PROJECTS_DIR = BASE_DIR / "projects"
 EXPORTS_DIR = BASE_DIR / "exports"
 MODELS_DIR = BASE_DIR / "models"
 TEMP_DIR = BASE_DIR / "temp"
+CACHE_DIR = BASE_DIR / "cache"
+FIXTURES_DIR = BASE_DIR / "tests" / "fixtures"
 
 # Ensure all primary runtime directories exist
-for directory in (PROJECTS_DIR, EXPORTS_DIR, MODELS_DIR, TEMP_DIR):
+for directory in (PROJECTS_DIR, EXPORTS_DIR, MODELS_DIR, TEMP_DIR, CACHE_DIR, FIXTURES_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
 # Hardware and environment
