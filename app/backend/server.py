@@ -695,6 +695,7 @@ def get_clip_setting(project_id: str, clip_id: str):
                 end=end_val,
                 peak=peak_val,
                 reasons=cand.get("reasons", []),
+                # pyrefly: ignore[bad-argument-type]
                 transcript_text=setting.get("full_text", ""),
                 facecam_region=fc,
             )
