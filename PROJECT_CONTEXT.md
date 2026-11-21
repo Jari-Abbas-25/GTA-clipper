@@ -106,7 +106,13 @@ e:\jari\Python\gta clipper\
 
 ## Completed Functionality
 
-### Platform Support (Multi-Platform — NEW)
+### First-Launch AI Configuration (NEW)
+- Onboarding modal triggers automatically on first launch before URL input.
+- **Option A (Local AI)**: Auto-detects local Ollama server, lists installed models with disk sizes and approximate RAM requirements (e.g. `llama3.2:3b` ~2.0GB / ~2.8GB RAM, `qwen2.5:3b` ~1.9GB / ~2.6GB RAM). Includes zero-cost heuristic fallback when Ollama is unavailable.
+- **Option B (Cloud AI)**: Supports DeepSeek (`deepseek-chat`) and OpenRouter models with masked key storage and connectivity testing (`POST /api/ai/test`).
+- Config saved with `configured: True` to `.ai_config.json` (git-ignored). Can be reopened anytime via the AI Settings button.
+
+### Multi-Platform Support
 - **Twitch VODs**: yt-dlp video download + Twitch public GraphQL chat
 - **YouTube**: yt-dlp video download + yt-dlp live_chat track (archived livestreams)
 - **Local files**: copy/hardlink + optional `.chat.json` sidecar
@@ -114,26 +120,42 @@ e:\jari\Python\gta clipper\
 - Pre-download probe (`/api/probe`): title, duration, thumbnail via `yt-dlp --dump-json`
 - Platform badge in UI (purple Twitch / red YouTube / grey Local)
 
-### Startup Behavior (FIXED)
+### Real AI Highlight Detection & Tuning (NEW)
+- Analysis Options Drawer in Dashboard allows configuring:
+  - **Target highlight count**: Default 5 (targeting 4–6+ strong clips)
+  - **Sensitivity**: Low, Medium, High (adjusts spike threshold and baseline multipliers)
+  - **Focus Mode**: All, Action (loudness & intensity), Funny (laughter/KEKW spikes), Story (dialogue & pacing)
+  - **Min/Max Duration**: Default 15s to 60s
+- Candidates card list with checkboxes, confidence score, peak hype, duration, and one-click editor opening.
+- Automatic generation of multi-section editing arrangements on detection.
+
+### Structured AI Multi-Section Timeline Editing (NEW)
+- Clips automatically receive structured narrative section breakdowns:
+  - Intro / Build-up (Full gameplay crop)
+  - Climax / Peak (Split-screen streamer reaction)
+  - Climax Zoom (Action focus 1.35x zoom)
+  - Outro / Aftermath (Blurred fit)
+- Re-generate anytime with "⚡ AI Edit Suggestions" (`POST /api/projects/{id}/clips/{cid}/ai-edit-suggestions`).
+
+### Upgraded Canvas & Multi-Section Manual Video Editor (NEW)
+- **Aspect Ratio Switcher**: One-click toggling between `9:16 Portrait` (1080×1920) and `16:9 Landscape` (1920×1080) with dynamic canvas resizing.
+- **Multi-Section Timeline**: Time ruler with visual ticks, color-coded section blocks, playhead scrubber, "Split Section" at playhead, "Delete Section", and boundary trimming.
+- **Independent Element Controls**:
+  - **Gameplay**: Zoom 1.0x–3.0x, Pan X, Pan Y, Position Y, Border width & color, Corner radius, Reset.
+  - **Streamer**: Enable/Disable, Zoom 1.0x–2.5x, Crop framing (X, Y, W, H), interactive canvas drag & corner handle resizing, Border width & color, Corner radius, Z-index.
+  - **Layout per section**: Split, Crop, Fit, PIP applied dynamically as the playhead advances.
+
+### Export Destination & Native File Management (NEW)
+- Render directly to user-chosen paths outside the project directory.
+- Native Windows "Browse Destination" dialog (`POST /api/system/browse-save-path`).
+- "Open Containing Folder" button (`POST /api/system/open-folder`) highlights the rendered video in Windows Explorer.
+- Frame-accurate FFmpeg multi-section concatenation with `setsar=1` aspect ratio normalization and burned-in subtitles.
+
+### Startup Behavior
 - Dashboard starts empty; no auto-loading of projects
 - Shows existing genuine user projects or empty state
 - Processing starts ONLY after user pastes URL + clicks Start Processing
 - Demo is accessible via explicit "Load Sample Clip" button (calls `/api/projects/create-demo`)
-
-### AI Provider System (REWRITTEN)
-- **Ollama**: auto-discovers models at `http://localhost:11434`; `GET /api/ai/ollama/models`
-- **DeepSeek**: `deepseek-chat` via `https://api.deepseek.com/v1`
-- **OpenRouter**: any model via `https://openrouter.ai/api/v1`
-- **Heuristics**: gaming keyword + chat/audio signal fallback (always available)
-- Config stored in `.ai_config.json` (git-ignored)
-- Keys masked in UI (e.g. `sk-****...abcd`)
-- `POST /api/ai/test` verifies connectivity before saving
-- Graceful fallback to heuristics if any provider fails
-
-### Save As Dialog (NEW)
-- `POST /api/exports/{pid}/{cid}/save-dialog` → Tkinter subprocess → native Windows file dialog
-- `POST /api/exports/{pid}/{cid}/save-to-path` → copies rendered file to chosen path
-- UI shows export success bar with Save As button
 
 ### Repository Cleanup (DONE)
 - Test fixtures moved from `projects/` → `tests/fixtures/sample_project/`
@@ -183,25 +205,33 @@ e:\jari\Python\gta clipper\
 
 ## Test Results
 
-### test_pipeline.py (all passed ✅)
-- 7 URL detection cases passed
-- 36s synthetic 1080p video generated (1.49 MB)
-- 82 synthetic chat messages, 10 loudness spikes, 6 chat events
-- 2 candidates: c01 Hype 99/100, c02 Hype 81/100
-- 4 layout renders: split (137KB), fit (534KB), crop (166KB), pip (168KB) — all 1080×1920
-- Storage cleanup: freed 1.1 MB, all exports preserved
-- `tests/scratch/` cleaned after run
+### test_pipeline.py (all 9/9 passed ✅)
+- 7 URL detection cases passed (Twitch VODs, channels, YouTube standard, Shorts, Livestreams)
+- 36s synthetic 1080p video generated with dynamic audio spikes
+- 82 synthetic chat messages with emote surges
+- Multi-signal detection: Rank #1 (c01 Hype 99/100), Rank #2 (c02 Hype 81/100)
+- faster-whisper INT8 candidate transcription + ASS subtitle generation
+- FFmpeg 9:16 vertical 1080×1920 MP4 rendering verified across all 4 layouts:
+  - Split: 1080×1920 (136 KB)
+  - Fit: 1080×1920 (533 KB)
+  - Crop: 1080×1920 (166 KB)
+  - PIP: 1080×1920 (169 KB)
+- Storage cleanup: cache freed, all exports preserved, `tests/scratch/` cleanly deleted
 
 ### test_api.py (all passed ✅)
-- `/api/status` → 200 OK, ai_mode/ai_provider included
+- `/api/status` → 200 OK (CPU cores, tools, active AI provider)
 - `/api/probe` → Twitch 200, YouTube 200
-- AI config get/update → 200 OK
-- Heuristics test → `success: True`
-- DeepSeek missing key → `success: False` (correctly handled)
-- Demo project creation → 200, title correct, 2 candidates
-- Clip render → `c01_Chat_Lost_It_KEKW.mp4` (0.36 MB)
-- Save-to-path → 200 OK, file written
-- Cleanup → projects/ and exports/ left empty
+- AI config get/update with `configured: True`
+- `/api/ai/ollama/models` returns model names, details, and RAM/disk specs
+- Heuristics connection test → `success: True`
+- DeepSeek missing key validation → `success: False` (correctly rejected)
+- Demo project creation → 200 OK, 2 highlight candidates
+- `/api/projects/{id}/clips/{cid}/ai-edit-suggestions` → generates structured sections
+- Multi-section timeline settings save → 200 OK
+- Multi-section MP4 render directly to custom destination path → 200 OK, valid MP4
+- `/api/exports/{pid}/{cid}/save-to-path` verified
+- `/api/system/open-folder` verified with Explorer integration
+- Complete cleanup of test demo projects
 
 ---
 

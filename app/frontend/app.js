@@ -1,7 +1,8 @@
 /**
- * GTA Clipper — Application Controller.
+ * GTA Clipper — Advanced Application Controller.
  * Manages project state, views, multi-platform video ingestion (Twitch & YouTube),
- * AI provider configuration, and editor integration.
+ * First-Launch AI Configuration, Real AI Highlight Detection Tuning,
+ * Timeline-based Multi-Section Editing, and External Destination Exporting.
  */
 
 class AppController {
@@ -13,7 +14,9 @@ class AppController {
     this.editor = null;
     this.pollInterval = null;
     this.probeTimeout = null;
+    this.lastRenderedPath = null;
     this.lastRenderedFilename = null;
+    this.aiConfig = null;
 
     this.init();
   }
@@ -23,7 +26,11 @@ class AppController {
     await this.checkSystemStatus();
     await this.loadAiConfig();
     await this.loadDashboardProjects();
-    // Do NOT automatically load any project or switch view away from setup dashboard!
+
+    // Check First-Launch AI Setup: if not configured, show initial setup modal BEFORE anything else
+    if (!this.aiConfig || !this.aiConfig.configured) {
+      this.openFirstLaunchModal();
+    }
   }
 
   // =========================================================================
@@ -62,8 +69,144 @@ class AppController {
     }
   }
 
+  async loadAiConfig() {
+    try {
+      const res = await fetch('/api/ai/config');
+      this.aiConfig = await res.json();
+      return this.aiConfig;
+    } catch (e) {
+      console.warn('Load AI config error:', e);
+      return null;
+    }
+  }
+
   // =========================================================================
-  // Dashboard Projects List (Clean Empty State & Genuine User Projects)
+  // First-Launch AI Setup Screen (Mandatory Onboarding)
+  // =========================================================================
+
+  openFirstLaunchModal() {
+    const modal = document.getElementById('aiFirstLaunchModal');
+    modal.classList.add('active');
+    this.refreshFirstLaunchOllama();
+  }
+
+  async refreshFirstLaunchOllama() {
+    const badge = document.getElementById('flOllamaBadge');
+    const sel = document.getElementById('flOllamaModelSelect');
+    const url = document.getElementById('flOllamaUrlInput').value.trim();
+
+    badge.textContent = 'Probing...';
+    badge.className = 'tag';
+
+    try {
+      const res = await fetch(`/api/ai/ollama/models?url=${encodeURIComponent(url)}`);
+      const data = await res.json();
+
+      if (data.online) {
+        badge.textContent = `Online (${data.models.length} models)`;
+        badge.className = 'tag local';
+
+        if (data.model_details && data.model_details.length > 0) {
+          sel.innerHTML = data.model_details.map(m => {
+            const recText = m.recommended ? ' ★ RECOMMENDED' : '';
+            return `<option value="${m.name}">${m.name} — ${m.size} (${m.ram})${recText}</option>`;
+          }).join('');
+          if (data.recommended) sel.value = data.recommended;
+          this.updateFirstLaunchModelInfo(sel.value, data.specs);
+        } else {
+          sel.innerHTML = '<option value="">(No models installed - rule-based heuristics will run)</option>';
+        }
+      } else {
+        badge.textContent = 'Offline (Heuristics Active)';
+        badge.className = 'tag';
+        sel.innerHTML = '<option value="">(Ollama daemon offline - heuristics active)</option>';
+      }
+    } catch (e) {
+      badge.textContent = 'Offline';
+    }
+  }
+
+  updateFirstLaunchModelInfo(modelName, specs) {
+    const info = document.getElementById('flModelReqInfo');
+    if (!specs || !modelName) return;
+    const spec = specs[modelName];
+    if (spec) {
+      info.textContent = `Selected: ${modelName} | Size: ${spec.size} | RAM: ${spec.ram} — ${spec.desc}`;
+    }
+  }
+
+  async testFirstLaunchApi() {
+    const prov = document.getElementById('flApiProviderSelect').value;
+    const model = document.getElementById('flApiModelInput').value.trim();
+    const key = document.getElementById('flApiKeyInput').value.trim();
+    const statusText = document.getElementById('flTestStatusText');
+
+    statusText.textContent = 'Testing connection...';
+    statusText.style.color = 'var(--text-muted)';
+
+    try {
+      const res = await fetch('/api/ai/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: prov, model: model, api_key: key })
+      });
+      const data = await res.json();
+      if (data.success) {
+        statusText.textContent = `✅ ${data.message}`;
+        statusText.style.color = 'var(--accent-green)';
+      } else {
+        statusText.textContent = `⚠️ ${data.message}`;
+        statusText.style.color = 'var(--accent-red)';
+      }
+    } catch (e) {
+      statusText.textContent = `Error: ${e.message}`;
+      statusText.style.color = 'var(--accent-red)';
+    }
+  }
+
+  async saveFirstLaunchConfig() {
+    const isApi = document.getElementById('firstLaunchTabApi').classList.contains('active');
+    const prov = isApi ? document.getElementById('flApiProviderSelect').value : 'ollama';
+
+    const payload = {
+      mode: isApi ? 'api' : 'local',
+      provider: prov,
+      configured: true
+    };
+
+    if (isApi) {
+      if (prov === 'deepseek') {
+        payload.deepseek_model = document.getElementById('flApiModelInput').value.trim();
+        const key = document.getElementById('flApiKeyInput').value.trim();
+        if (key && !key.includes('****')) payload.deepseek_key = key;
+      } else {
+        payload.openrouter_model = document.getElementById('flApiModelInput').value.trim();
+        const key = document.getElementById('flApiKeyInput').value.trim();
+        if (key && !key.includes('****')) payload.openrouter_key = key;
+      }
+    } else {
+      payload.ollama_url = document.getElementById('flOllamaUrlInput').value.trim();
+      payload.ollama_model = document.getElementById('flOllamaModelSelect').value;
+    }
+
+    try {
+      const res = await fetch('/api/ai/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      this.aiConfig = data.config;
+      document.getElementById('aiFirstLaunchModal').classList.remove('active');
+      this.updateAiHeaderPill(data.config.mode, data.config.provider, data.config.ollama_model);
+      alert('AI Configuration complete! You can now paste your VOD or YouTube URL.');
+    } catch (e) {
+      alert(`Save error: ${e.message}`);
+    }
+  }
+
+  // =========================================================================
+  // Dashboard & Projects List
   // =========================================================================
 
   async loadDashboardProjects() {
@@ -77,7 +220,7 @@ class AppController {
           <div class="empty-state">
             <div class="empty-state-icon">🎮</div>
             <div class="empty-state-title">No Projects Yet</div>
-            <p>Paste a Twitch VOD or YouTube video URL above to detect highlights and generate 9:16 clips.</p>
+            <p>Paste a Twitch VOD or YouTube video URL above to detect highlights and generate clips.</p>
           </div>
         `;
         return;
@@ -132,7 +275,23 @@ class AppController {
     document.getElementById('btnCloseStorageModal').addEventListener('click', () => document.getElementById('storageModal').classList.remove('active'));
     document.getElementById('btnCloseProjectsModal').addEventListener('click', () => document.getElementById('projectsModal').classList.remove('active'));
 
-    // URL Input & Live Platform Detection
+    // First-Launch Modal Tabs & Actions
+    document.getElementById('firstLaunchTabLocal').addEventListener('click', () => {
+      document.getElementById('firstLaunchTabLocal').classList.add('active');
+      document.getElementById('firstLaunchTabApi').classList.remove('active');
+      document.getElementById('firstLaunchContentLocal').style.display = 'block';
+      document.getElementById('firstLaunchContentApi').style.display = 'none';
+    });
+    document.getElementById('firstLaunchTabApi').addEventListener('click', () => {
+      document.getElementById('firstLaunchTabApi').classList.add('active');
+      document.getElementById('firstLaunchTabLocal').classList.remove('active');
+      document.getElementById('firstLaunchContentApi').style.display = 'block';
+      document.getElementById('firstLaunchContentLocal').style.display = 'none';
+    });
+    document.getElementById('btnFlTestConnection').addEventListener('click', () => this.testFirstLaunchApi());
+    document.getElementById('btnSaveFirstLaunchAi').addEventListener('click', () => this.saveFirstLaunchConfig());
+
+    // URL Input & Probe
     const urlInput = document.getElementById('vodUrlInput');
     urlInput.addEventListener('input', () => this.handleUrlInput(urlInput.value));
 
@@ -146,12 +305,20 @@ class AppController {
       }
     });
 
-    // Editor View
+    // Editor View Navigation & Header Actions
     document.getElementById('btnBackToHighlights').addEventListener('click', () => this.switchView('highlightsView'));
     document.getElementById('btnSaveClipSettings').addEventListener('click', () => this.saveClipSettings());
-    document.getElementById('btnExportClip').addEventListener('click', () => this.exportCurrentClip());
-    document.getElementById('btnTranscribeClip').addEventListener('click', () => this.transcribeCurrentClip());
+    document.getElementById('btnOpenExportModal').addEventListener('click', () => this.openExportModal());
+    document.getElementById('btnCloseExportModal').addEventListener('click', () => document.getElementById('exportModal').classList.remove('active'));
+    document.getElementById('btnCancelExportModal').addEventListener('click', () => document.getElementById('exportModal').classList.remove('active'));
+    document.getElementById('btnBrowseExportDest').addEventListener('click', () => this.browseExportDestination());
+    document.getElementById('btnStartRenderExport').addEventListener('click', () => this.startRenderExport());
+    document.getElementById('btnOpenExportFolder').addEventListener('click', () => this.openExportFolder());
     document.getElementById('btnSaveAsNative').addEventListener('click', () => this.saveAsNativeDialog());
+
+    // Aspect Ratio Switching
+    document.getElementById('btnAspect916').addEventListener('click', () => this.setEditorAspect('9:16'));
+    document.getElementById('btnAspect169').addEventListener('click', () => this.setEditorAspect('16:9'));
 
     // Canvas playback controls
     const video = document.getElementById('sourceVideo');
@@ -160,8 +327,8 @@ class AppController {
       else video.pause();
     });
     document.getElementById('btnResetCanvasTime').addEventListener('click', () => {
-      if (this.activeClip) {
-        video.currentTime = parseFloat(document.getElementById('trimStartInput').value) || this.activeClip.start;
+      if (this.editor) {
+        video.currentTime = this.editor.clipStart;
       }
     });
 
@@ -176,21 +343,73 @@ class AppController {
     });
 
     video.addEventListener('timeupdate', () => {
-      if (video.duration) {
+      if (video.duration && this.editor) {
         const pct = (video.currentTime / video.duration) * 100;
         document.getElementById('scrubberPlayhead').style.left = `${pct}%`;
-        document.getElementById('editorCurrentTimeText').textContent = `${video.currentTime.toFixed(1)}s`;
+        const relTime = Math.max(0.0, video.currentTime - this.editor.clipStart);
+        document.getElementById('editorCurrentTimeText').textContent = `${relTime.toFixed(1)}s`;
+        this.renderTimelineSections();
       }
     });
 
-    // Trim Inputs & Nudges
+    // Multi-Section Timeline Operations
+    document.getElementById('btnSplitSection').addEventListener('click', () => {
+      if (this.editor) {
+        const curOffset = Math.max(0.0, video.currentTime - this.editor.clipStart);
+        const ok = this.editor.splitSectionAt(curOffset);
+        if (ok) {
+          this.renderTimelineSections();
+          this.syncPropertiesPanel();
+        } else {
+          alert('Cannot split section here. Place playhead at least 1s inside a section.');
+        }
+      }
+    });
+
+    document.getElementById('btnDeleteSection').addEventListener('click', () => {
+      if (this.editor) {
+        if (confirm('Delete the active timeline section and merge with adjacent?')) {
+          this.editor.deleteActiveSection();
+          this.renderTimelineSections();
+          this.syncPropertiesPanel();
+        }
+      }
+    });
+
+    document.getElementById('btnAiSuggestEdits').addEventListener('click', () => this.generateAiSuggestionsForClip());
+    document.getElementById('btnResetSections').addEventListener('click', () => {
+      if (this.editor && confirm('Reset timeline to a single uniform layout?')) {
+        this.editor.initDefaultSection();
+        this.renderTimelineSections();
+        this.syncPropertiesPanel();
+      }
+    });
+
+    document.getElementById('btnApplySecTrim').addEventListener('click', () => {
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        if (sec) {
+          sec.start = parseFloat(document.getElementById('secStartInput').value) || 0.0;
+          sec.end = parseFloat(document.getElementById('secEndInput').value) || 30.0;
+          this.editor.drawFrame();
+          this.renderTimelineSections();
+        }
+      }
+    });
+
+    // Clip Window Trim
     const startIn = document.getElementById('trimStartInput');
     const endIn = document.getElementById('trimEndInput');
     const updateTrim = () => {
       const s = parseFloat(startIn.value) || 0;
       const e = parseFloat(endIn.value) || 0;
       document.getElementById('editorDurationText').textContent = `${Math.max(0, e - s).toFixed(1)}s`;
+      if (this.editor) {
+        this.editor.clipStart = s;
+        this.editor.clipEnd = e;
+      }
       this.updateScrubberHighlight();
+      this.renderTimelineRuler();
     };
     startIn.addEventListener('input', updateTrim);
     endIn.addEventListener('input', updateTrim);
@@ -200,34 +419,113 @@ class AppController {
     document.getElementById('btnNudgeEndMinus1').addEventListener('click', () => { endIn.value = Math.max(0, (parseFloat(endIn.value) - 1.0)).toFixed(1); updateTrim(); });
     document.getElementById('btnNudgeEndPlus1').addEventListener('click', () => { endIn.value = (parseFloat(endIn.value) + 1.0).toFixed(1); updateTrim(); });
 
-    // Layout Buttons
-    document.querySelectorAll('.layout-btn').forEach(btn => {
+    // Properties Panel Tabs
+    document.getElementById('tabPropGameplay').addEventListener('click', () => this.switchPropTab('gameplay'));
+    document.getElementById('tabPropStreamer').addEventListener('click', () => this.switchPropTab('streamer'));
+    document.getElementById('tabPropLayout').addEventListener('click', () => this.switchPropTab('layout'));
+
+    // Gameplay Element Controls
+    const gpZoom = document.getElementById('gameplayZoomInput');
+    const gpPanX = document.getElementById('gameplayPanXInput');
+    const gpPosY = document.getElementById('gameplayPosYInput');
+
+    gpZoom.addEventListener('input', () => {
+      document.getElementById('txtGameplayZoom').textContent = `${parseFloat(gpZoom.value).toFixed(2)}x`;
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.gameplay.zoom = parseFloat(gpZoom.value);
+        this.editor.drawFrame();
+      }
+    });
+    gpPanX.addEventListener('input', () => {
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.gameplay.pan_x = parseFloat(gpPanX.value);
+        this.editor.drawFrame();
+      }
+    });
+    gpPosY.addEventListener('input', () => {
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.gameplay.y = parseFloat(gpPosY.value);
+        this.editor.updateOverlayBoxPosition();
+        this.editor.drawFrame();
+      }
+    });
+    document.getElementById('btnResetGameplay').addEventListener('click', () => {
+      gpZoom.value = 1.0;
+      gpPanX.value = 0.5;
+      document.getElementById('txtGameplayZoom').textContent = '1.0x';
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.gameplay.zoom = 1.0;
+        sec.gameplay.pan_x = 0.5;
+        this.editor.drawFrame();
+      }
+    });
+
+    // Streamer Element Controls
+    document.getElementById('chkStreamerEnabled').addEventListener('change', (e) => {
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.streamer.enabled = e.target.checked;
+        this.editor.updateOverlayBoxPosition();
+        this.editor.drawFrame();
+      }
+    });
+    const stZoom = document.getElementById('streamerZoomInput');
+    stZoom.addEventListener('input', () => {
+      document.getElementById('txtStreamerZoom').textContent = `${parseFloat(stZoom.value).toFixed(2)}x`;
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.streamer.zoom = parseFloat(stZoom.value);
+        this.editor.drawFrame();
+      }
+    });
+    const stBorder = document.getElementById('streamerBorderInput');
+    stBorder.addEventListener('input', () => {
+      document.getElementById('txtStreamerBorder').textContent = `${stBorder.value}px`;
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.streamer.border_w = parseInt(stBorder.value, 10);
+        this.editor.drawFrame();
+      }
+    });
+    const stRadius = document.getElementById('streamerRadiusInput');
+    stRadius.addEventListener('input', () => {
+      document.getElementById('txtStreamerRadius').textContent = `${stRadius.value}px`;
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.streamer.corner_radius = parseInt(stRadius.value, 10);
+        this.editor.drawFrame();
+      }
+    });
+    document.querySelectorAll('.swatch-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.layout-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.swatch-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const layout = btn.dataset.layout;
         if (this.editor) {
-          this.editor.setConfig({ layout });
+          const sec = this.editor.getActiveSection();
+          sec.streamer.border_color = btn.dataset.color;
+          this.editor.updateOverlayBoxPosition();
+          this.editor.drawFrame();
         }
       });
     });
-
-    // Pan & Zoom Sliders
-    const panIn = document.getElementById('panRangeInput');
-    const zoomIn = document.getElementById('zoomRangeInput');
-    panIn.addEventListener('input', () => {
-      if (this.editor) this.editor.setConfig({ gameplayPanX: parseFloat(panIn.value) });
-    });
-    zoomIn.addEventListener('input', () => {
-      if (this.editor) this.editor.setConfig({ zoomFactor: parseFloat(zoomIn.value) });
-    });
-
-    // Caption Style
-    document.getElementById('selCaptionStyle').addEventListener('change', (e) => {
-      if (this.editor) this.editor.setConfig({ subtitleStyle: e.target.value });
-    });
-    document.getElementById('chkEnableCaptions').addEventListener('change', (e) => {
-      if (this.editor) this.editor.setConfig({ enableSubtitles: e.target.checked });
+    document.getElementById('btnResetStreamer').addEventListener('click', () => {
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.streamer.x = 0.65;
+        sec.streamer.y = 0.05;
+        sec.streamer.w = 0.30;
+        sec.streamer.h = 0.25;
+        sec.streamer.zoom = 1.0;
+        sec.streamer.corner_radius = 8;
+        sec.streamer.border_w = 2;
+        this.editor.updateOverlayBoxPosition();
+        this.editor.drawFrame();
+        this.syncPropertiesPanel();
+      }
     });
 
     // Auto-detect Facecam
@@ -235,12 +533,50 @@ class AppController {
       if (this.currentProjectMeta && this.currentProjectMeta.facecam_region) {
         const fc = this.currentProjectMeta.facecam_region;
         if (this.editor) {
-          this.editor.setConfig({ facecam: { x: fc.x, y: fc.y, w: fc.w, h: fc.h } });
+          const sec = this.editor.getActiveSection();
+          sec.streamer.crop_x = fc.x;
+          sec.streamer.crop_y = fc.y;
+          sec.streamer.crop_w = fc.w;
+          sec.streamer.crop_h = fc.h;
+          this.editor.drawFrame();
         }
+        alert('Webcam coordinates mapped to streamer facecam box!');
       } else {
-        alert('Facecam auto-detected default gaming coordinates (Top-Right webcam).');
+        alert('Default gaming webcam coordinates applied (Top-Right facecam).');
       }
     });
+
+    // Layout Buttons for Active Section
+    document.querySelectorAll('.layout-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.layout-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        if (this.editor) {
+          this.editor.setActiveSectionLayout(btn.dataset.layout);
+          this.renderTimelineSections();
+        }
+      });
+    });
+
+    // Background & Subtitles
+    document.getElementById('selBackgroundStyle').addEventListener('change', (e) => {
+      if (this.editor) {
+        const sec = this.editor.getActiveSection();
+        sec.background.type = e.target.value === 'blur' ? 'blur' : 'color';
+        sec.background.color = e.target.value === 'darkblue' ? '#0a0e17' : '#000000';
+        this.editor.drawFrame();
+      }
+    });
+
+    document.getElementById('selCaptionStyle').addEventListener('change', (e) => {
+      if (this.editor) this.editor.config.subtitle_style = e.target.value;
+    });
+    document.getElementById('chkEnableCaptions').addEventListener('change', (e) => {
+      if (this.editor) this.editor.config.enable_subtitles = e.target.checked;
+    });
+
+    // Transcription
+    document.getElementById('btnTranscribeClip').addEventListener('click', () => this.transcribeCurrentClip());
 
     // Storage Actions
     document.getElementById('btnCleanCache').addEventListener('click', () => this.runCleanup(false, true));
@@ -250,7 +586,7 @@ class AppController {
       }
     });
 
-    // AI Settings Modal
+    // AI Settings Modal (Header)
     document.getElementById('btnAiSettings').addEventListener('click', () => this.openAiModal());
     document.getElementById('aiStatusPill').addEventListener('click', () => this.openAiModal());
     document.getElementById('btnCloseAiModal').addEventListener('click', () => document.getElementById('aiSettingsModal').classList.remove('active'));
@@ -300,7 +636,6 @@ class AppController {
       badge.className = 'platform-indicator local';
     }
 
-    // Debounce probe to preview video info
     if (this.probeTimeout) clearTimeout(this.probeTimeout);
     if (clean.startsWith('http') || clean.length > 5) {
       this.probeTimeout = setTimeout(() => this.probeVideo(clean), 700);
@@ -336,12 +671,12 @@ class AppController {
 
       card.style.display = 'flex';
     } catch (e) {
-      // Ignore background probe failure
+      // Ignore background probe error
     }
   }
 
   // =========================================================================
-  // Ingest & Background Progress
+  // Ingest & Highlight Detection
   // =========================================================================
 
   async startIngest() {
@@ -374,7 +709,6 @@ class AppController {
   }
 
   async loadSampleClip() {
-    // Explicit offline demonstration trigger
     document.getElementById('progressCard').style.display = 'block';
     this.updateProgress(50, 'Loading sample GTA 6 highlight fixture...');
 
@@ -406,7 +740,6 @@ class AppController {
         this.updateProgress(job.percent || 10, job.message || 'Processing...');
 
         if (data.meta.status === 'downloaded') {
-          // Trigger analysis automatically after download completes
           clearInterval(this.pollInterval);
           this.triggerAnalysis();
         } else if (data.meta.status === 'ready') {
@@ -429,8 +762,20 @@ class AppController {
     document.getElementById('progressCard').style.display = 'block';
     this.updateProgress(15, 'Extracting audio & detecting highlight signals...');
 
+    const payload = {
+      target_count: parseInt(document.getElementById('selTargetCount').value, 10) || 6,
+      sensitivity: document.getElementById('selSensitivity').value || 'medium',
+      focus_mode: document.getElementById('selFocusMode').value || 'all',
+      min_duration: parseFloat(document.getElementById('inpMinDur').value) || 15.0,
+      max_duration: parseFloat(document.getElementById('inpMaxDur').value) || 45.0,
+    };
+
     try {
-      await fetch(`/api/projects/${this.currentProjectId}/analyze`, { method: 'POST' });
+      await fetch(`/api/projects/${this.currentProjectId}/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
       this.pollProjectStatus();
     } catch (e) {
       alert(`Failed to start analysis: ${e.message}`);
@@ -444,7 +789,7 @@ class AppController {
   }
 
   // =========================================================================
-  // Load Project Highlights
+  // Load Project & Candidates Screen
   // =========================================================================
 
   async loadProject(projectId) {
@@ -459,7 +804,6 @@ class AppController {
       document.getElementById('candCountText').textContent = data.candidate_count || 0;
       document.getElementById('exportCountText').textContent = data.exports ? data.exports.length : 0;
 
-      // Platform & Chat Tag
       const plat = (data.meta.platform || 'twitch').toLowerCase();
       const pTag = document.getElementById('highlightPlatformTag');
       pTag.textContent = plat.toUpperCase();
@@ -474,7 +818,6 @@ class AppController {
 
       document.getElementById('aiProviderUsedText').textContent = (data.meta.ai_provider || 'Heuristics').toUpperCase();
 
-      // Load Highlights
       const hRes = await fetch(`/api/projects/${projectId}/highlights`);
       if (hRes.ok) {
         this.currentHighlights = await hRes.json();
@@ -557,7 +900,7 @@ class AppController {
 
     candidates.forEach(c => {
       const card = document.createElement('div');
-      card.className = 'candidate-card';
+      card.className = `candidate-card ${c.accepted === false ? 'deselected' : ''}`;
       card.id = `card_${c.id}`;
 
       const tagsHtml = (c.reasons || []).map(r => {
@@ -568,25 +911,47 @@ class AppController {
         return `<span class="${cls}">${r.code}: ${r.value}</span>`;
       }).join('');
 
+      const segCount = (c.edit_suggestions && c.edit_suggestions.length) || 3;
+
       card.innerHTML = `
         <div class="card-top">
-          <span class="card-rank">#${c.rank} (${c.id})</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" class="chk-select-cand" data-id="${c.id}" ${c.accepted !== false ? 'checked' : ''} title="Include in review">
+            <span class="card-rank">#${c.rank} (${c.id})</span>
+          </div>
           <span class="card-score-badge">HYPE ${c.hype_score}/100</span>
         </div>
         <div class="card-body">
           <div class="card-title">${c.suggested_title || 'Gaming Highlight'}</div>
           <div class="card-explanation">${c.explanation || 'Interesting gaming moment.'}</div>
           <div class="reasons-tags">${tagsHtml}</div>
+          <div class="ai-edit-badge">⚡ ${segCount} AI Timeline Transitions Prepared</div>
         </div>
         <div class="card-footer">
           <span class="card-timing">⏱️ ${c.start.toFixed(1)}s - ${c.end.toFixed(1)}s (${c.duration.toFixed(1)}s)</span>
-          <button class="btn btn-primary btn-sm btn-edit-clip" data-id="${c.id}">Edit 9:16 ✂️</button>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-sm btn-edit-clip" data-id="${c.id}">Edit Clip ✂️</button>
+            <button class="btn btn-sm btn-danger btn-remove-cand" data-id="${c.id}">✕</button>
+          </div>
         </div>
       `;
+
+      card.querySelector('.chk-select-cand').addEventListener('change', (e) => {
+        c.accepted = e.target.checked;
+        card.classList.toggle('deselected', !c.accepted);
+      });
 
       card.querySelector('.btn-edit-clip').addEventListener('click', (e) => {
         e.stopPropagation();
         this.openClipEditor(c.id);
+      });
+
+      card.querySelector('.btn-remove-cand').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm(`Remove highlight #${c.rank}?`)) {
+          this.currentHighlights.candidates = this.currentHighlights.candidates.filter(item => item.id !== c.id);
+          this.renderCandidates(this.currentHighlights.candidates);
+        }
       });
 
       grid.appendChild(card);
@@ -594,7 +959,7 @@ class AppController {
   }
 
   // =========================================================================
-  // Clip Editor
+  // Clip Editor & Multi-Section Timeline
   // =========================================================================
 
   async openClipEditor(clipId) {
@@ -603,7 +968,7 @@ class AppController {
     if (!cand) return;
     this.activeClip = cand;
 
-    document.getElementById('editorClipTitle').textContent = `Editing ${cand.id}: ${cand.suggested_title || 'Highlight'}`;
+    document.getElementById('editorClipTitleInput').value = cand.suggested_title || `Highlight ${cand.id}`;
     document.getElementById('trimStartInput').value = cand.start.toFixed(1);
     document.getElementById('trimEndInput').value = cand.end.toFixed(1);
     document.getElementById('editorDurationText').textContent = `${cand.duration.toFixed(1)}s`;
@@ -615,7 +980,17 @@ class AppController {
 
     if (!this.editor) {
       this.editor = new CanvasEditor('editorCanvas', 'sourceVideo', 'facecamOverlayBox');
+      this.editor.onSectionChanged = (idx, sec) => {
+        this.renderTimelineSections();
+        this.syncPropertiesPanel();
+      };
+      this.editor.onPropertiesChanged = (sec) => {
+        this.syncPropertiesPanel();
+      };
     }
+
+    this.editor.clipStart = cand.start;
+    this.editor.clipEnd = cand.end;
 
     try {
       const res = await fetch(`/api/projects/${this.currentProjectId}/clips/${clipId}/settings`);
@@ -623,21 +998,20 @@ class AppController {
         const s = await res.json();
         this.editor.setConfig({
           layout: s.layout || 'split',
-          facecam: { x: s.facecam_x, y: s.facecam_y, w: s.facecam_w, h: s.facecam_h },
-          gameplayPanX: s.gameplay_pan_x,
-          zoomFactor: s.zoom_factor,
-          enableSubtitles: s.enable_subtitles,
-          subtitleStyle: s.subtitle_style,
+          aspect_ratio: s.aspect_ratio || '9:16',
+          facecam_x: s.facecam_x,
+          facecam_y: s.facecam_y,
+          facecam_w: s.facecam_w,
+          facecam_h: s.facecam_h,
+          gameplay_pan_x: s.gameplay_pan_x,
+          zoom_factor: s.zoom_factor,
+          sections: s.sections || cand.edit_suggestions || [],
+          enable_subtitles: s.enable_subtitles,
+          subtitle_style: s.subtitle_style,
           segments: s.segments || []
         });
 
-        document.querySelectorAll('.layout-btn').forEach(b => {
-          b.classList.toggle('active', b.dataset.layout === s.layout);
-        });
-        document.getElementById('panRangeInput').value = s.gameplay_pan_x || 0.5;
-        document.getElementById('zoomRangeInput').value = s.zoom_factor || 1.0;
-        document.getElementById('chkEnableCaptions').checked = s.enable_subtitles !== false;
-        document.getElementById('selCaptionStyle').value = s.subtitle_style || 'bold';
+        this.setEditorAspect(s.aspect_ratio || '9:16', false);
         document.getElementById('editorTranscriptText').value = s.full_text || '';
         if (s.start_s) document.getElementById('trimStartInput').value = s.start_s;
         if (s.end_s) document.getElementById('trimEndInput').value = s.end_s;
@@ -648,6 +1022,149 @@ class AppController {
 
     this.switchView('editorView');
     this.updateScrubberHighlight();
+    this.renderTimelineRuler();
+    this.renderTimelineSections();
+    this.syncPropertiesPanel();
+  }
+
+  setEditorAspect(aspect, redraw = true) {
+    document.getElementById('btnAspect916').classList.toggle('active', aspect === '9:16');
+    document.getElementById('btnAspect169').classList.toggle('active', aspect === '16:9');
+    document.getElementById('canvasTitleText').textContent = `CANVAS PREVIEW (${aspect})`;
+
+    const wrapper = document.getElementById('canvasWrapper');
+    if (aspect === '16:9') {
+      wrapper.style.width = '640px';
+      wrapper.style.height = '360px';
+    } else {
+      wrapper.style.width = '360px';
+      wrapper.style.height = '640px';
+    }
+
+    if (this.editor && redraw) {
+      this.editor.setAspectRatio(aspect);
+    }
+  }
+
+  renderTimelineRuler() {
+    const ruler = document.getElementById('timelineRuler');
+    ruler.innerHTML = '';
+    const dur = Math.max(5.0, (this.editor ? this.editor.clipEnd - this.editor.clipStart : 30.0));
+
+    const step = dur > 40 ? 10 : 5;
+    for (let t = 0; t <= dur; t += step) {
+      const pct = (t / dur) * 100;
+      const tick = document.createElement('div');
+      tick.className = 'ruler-tick';
+      tick.style.left = `${pct}%`;
+      tick.innerHTML = `<span>${t}s</span><div class="ruler-tick-mark"></div>`;
+      ruler.appendChild(tick);
+    }
+  }
+
+  renderTimelineSections() {
+    const track = document.getElementById('timelineSectionsTrack');
+    if (!track || !this.editor || !this.editor.sections) return;
+
+    track.innerHTML = '';
+    const dur = Math.max(1.0, this.editor.clipEnd - this.editor.clipStart);
+
+    this.editor.sections.forEach((sec, idx) => {
+      const block = document.createElement('div');
+      block.className = `timeline-section-block ${idx === this.editor.activeSectionIndex ? 'active' : ''}`;
+
+      const secDur = Math.max(0.5, sec.end - sec.start);
+      const widthPct = (secDur / dur) * 100;
+      block.style.flex = `${widthPct}`;
+
+      block.innerHTML = `
+        <div class="sec-badge-row">
+          <span style="font-weight: 700; font-size: 11px;">#${idx + 1}</span>
+          <span class="sec-layout-tag">${(sec.layout || 'split').toUpperCase()}</span>
+        </div>
+        <div class="sec-time-label">${sec.start.toFixed(1)}s - ${sec.end.toFixed(1)}s</div>
+      `;
+
+      block.addEventListener('click', () => {
+        this.editor.activeSectionIndex = idx;
+        const video = document.getElementById('sourceVideo');
+        video.currentTime = this.editor.clipStart + sec.start;
+        this.renderTimelineSections();
+        this.syncPropertiesPanel();
+      });
+
+      track.appendChild(block);
+    });
+
+    const activeSec = this.editor.getActiveSection();
+    if (activeSec) {
+      document.getElementById('secStartInput').value = activeSec.start.toFixed(1);
+      document.getElementById('secEndInput').value = activeSec.end.toFixed(1);
+    }
+  }
+
+  switchPropTab(tabId) {
+    document.querySelectorAll('.prop-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.prop-content').forEach(c => c.style.display = 'none');
+
+    if (tabId === 'gameplay') {
+      document.getElementById('tabPropGameplay').classList.add('active');
+      document.getElementById('contentPropGameplay').style.display = 'block';
+      if (this.editor) this.editor.selectedElement = 'gameplay';
+    } else if (tabId === 'streamer') {
+      document.getElementById('tabPropStreamer').classList.add('active');
+      document.getElementById('contentPropStreamer').style.display = 'block';
+      if (this.editor) this.editor.selectedElement = 'streamer';
+    } else {
+      document.getElementById('tabPropLayout').classList.add('active');
+      document.getElementById('contentPropLayout').style.display = 'block';
+    }
+    if (this.editor) this.editor.updateOverlayBoxPosition();
+  }
+
+  syncPropertiesPanel() {
+    if (!this.editor) return;
+    const sec = this.editor.getActiveSection();
+    if (!sec) return;
+
+    // Gameplay
+    document.getElementById('gameplayZoomInput').value = sec.gameplay.zoom || 1.0;
+    document.getElementById('txtGameplayZoom').textContent = `${(sec.gameplay.zoom || 1.0).toFixed(2)}x`;
+    document.getElementById('gameplayPanXInput').value = sec.gameplay.pan_x !== undefined ? sec.gameplay.pan_x : 0.5;
+    document.getElementById('gameplayPosYInput').value = sec.gameplay.y !== undefined ? sec.gameplay.y : 0.4;
+
+    // Streamer
+    document.getElementById('chkStreamerEnabled').checked = sec.streamer.enabled !== false;
+    document.getElementById('streamerZoomInput').value = sec.streamer.zoom || 1.0;
+    document.getElementById('txtStreamerZoom').textContent = `${(sec.streamer.zoom || 1.0).toFixed(2)}x`;
+    document.getElementById('streamerBorderInput').value = sec.streamer.border_w !== undefined ? sec.streamer.border_w : 2;
+    document.getElementById('txtStreamerBorder').textContent = `${sec.streamer.border_w || 2}px`;
+    document.getElementById('streamerRadiusInput').value = sec.streamer.corner_radius || 0;
+    document.getElementById('txtStreamerRadius').textContent = `${sec.streamer.corner_radius || 0}px`;
+
+    // Layout
+    document.querySelectorAll('.layout-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.layout === sec.layout);
+    });
+    document.getElementById('selBackgroundStyle').value = sec.background.type === 'blur' ? 'blur' : 'black';
+  }
+
+  async generateAiSuggestionsForClip() {
+    if (!this.activeClip) return;
+    try {
+      const res = await fetch(`/api/projects/${this.currentProjectId}/clips/${this.activeClip.id}/ai-edit-suggestions`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.sections && data.sections.length > 0) {
+        this.editor.applyAiEditSuggestions(data.sections);
+        this.renderTimelineSections();
+        this.syncPropertiesPanel();
+        alert(`AI Edit Suggestions applied! Generated ${data.sections.length} layout transitions across timeline.`);
+      }
+    } catch (e) {
+      alert(`AI Suggestions error: ${e.message}`);
+    }
   }
 
   updateScrubberHighlight() {
@@ -676,9 +1193,9 @@ class AppController {
       const data = await res.json();
       document.getElementById('editorTranscriptText').value = data.full_text || '';
       if (this.editor) {
-        this.editor.setConfig({ segments: data.segments || [] });
+        this.editor.config.segments = data.segments || [];
       }
-      alert('Transcription complete! Captions are now active on your 9:16 canvas preview.');
+      alert('Transcription complete! Captions are now active on your canvas preview.');
     } catch (e) {
       alert(`Transcription error: ${e.message}`);
     } finally {
@@ -691,17 +1208,19 @@ class AppController {
     if (!this.activeClip || !this.editor) return;
     const settings = {
       layout: this.editor.config.layout,
-      facecam_x: this.editor.config.facecam.x,
-      facecam_y: this.editor.config.facecam.y,
-      facecam_w: this.editor.config.facecam.w,
-      facecam_h: this.editor.config.facecam.h,
-      gameplay_pan_x: this.editor.config.gameplayPanX,
-      zoom_factor: this.editor.config.zoomFactor,
+      aspect_ratio: this.editor.aspectRatio,
+      facecam_x: this.editor.config.facecam_x,
+      facecam_y: this.editor.config.facecam_y,
+      facecam_w: this.editor.config.facecam_w,
+      facecam_h: this.editor.config.facecam_h,
+      gameplay_pan_x: this.editor.config.gameplay_pan_x,
+      zoom_factor: this.editor.config.zoom_factor,
+      sections: this.editor.sections,
       start_s: parseFloat(document.getElementById('trimStartInput').value),
       end_s: parseFloat(document.getElementById('trimEndInput').value),
       enable_subtitles: document.getElementById('chkEnableCaptions').checked,
       subtitle_style: document.getElementById('selCaptionStyle').value,
-      clip_title: this.activeClip.suggested_title
+      clip_title: document.getElementById('editorClipTitleInput').value.trim() || this.activeClip.suggested_title
     };
 
     try {
@@ -710,143 +1229,166 @@ class AppController {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
       });
-      alert('Clip settings saved successfully!');
+      alert('Clip progress saved successfully!');
     } catch (e) {
       alert(`Save error: ${e.message}`);
     }
   }
 
-  async exportCurrentClip() {
+  // =========================================================================
+  // Export Video Modal & Destination Selection
+  // =========================================================================
+
+  openExportModal() {
+    const modal = document.getElementById('exportModal');
+    modal.classList.add('active');
+    const title = (document.getElementById('editorClipTitleInput').value || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_');
+    document.getElementById('exportDestPathInput').placeholder = `Default: exports/${this.currentProjectId}/${this.activeClip.id}_${title}.mp4`;
+  }
+
+  async browseExportDestination() {
+    const title = (document.getElementById('editorClipTitleInput').value || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const defaultName = `${title}_${this.activeClip.id}.mp4`;
+
+    try {
+      const res = await fetch(`/api/system/browse-save-path?default_filename=${encodeURIComponent(defaultName)}`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (!data.cancelled && data.path) {
+        document.getElementById('exportDestPathInput').value = data.path;
+      }
+    } catch (e) {
+      alert(`Browse dialog error: ${e.message}`);
+    }
+  }
+
+  async startRenderExport() {
     if (!this.activeClip || !this.editor) return;
     await this.saveClipSettings();
 
-    const btn = document.getElementById('btnExportClip');
-    const origText = btn.innerHTML;
-    btn.innerHTML = 'Rendering 1080x1920 MP4...';
+    const destPath = document.getElementById('exportDestPathInput').value.trim();
+    const progressEl = document.getElementById('exportRenderProgress');
+    progressEl.style.display = 'block';
+
+    const btn = document.getElementById('btnStartRenderExport');
     btn.disabled = true;
 
     try {
       const res = await fetch(`/api/projects/${this.currentProjectId}/clips/${this.activeClip.id}/render`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({
+          destination_path: destPath || null,
+        })
       });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || 'Rendering failed');
       }
       const data = await res.json();
+      this.lastRenderedPath = data.output_path;
       this.lastRenderedFilename = data.filename;
 
-      // Reveal export success bar with Save As and Download actions
+      document.getElementById('exportModal').classList.remove('active');
+      progressEl.style.display = 'none';
+
+      // Show Export Success Bar
       const bar = document.getElementById('exportSuccessBar');
       document.getElementById('exportedFilename').textContent = data.filename;
       document.getElementById('exportedSize').textContent = `${data.size_mb} MB`;
-      document.getElementById('exportSavedPathText').textContent = `Default export: ${data.output_path}`;
+      document.getElementById('exportSavedPathText').textContent = `Saved at: ${data.output_path}`;
 
       const dlBtn = document.getElementById('btnDownloadExport');
       dlBtn.href = `/api/exports/${this.currentProjectId}/${data.filename}?download=true`;
 
       bar.style.display = 'flex';
-      alert(`🎉 Render Complete!\nClip: ${data.filename} (${data.size_mb} MB)\nUse 'Save As' below to select your desired folder on disk.`);
+      alert(`Export Complete!\nVideo saved to: ${data.output_path}`);
     } catch (e) {
-      alert(`Export failed: ${e.message}`);
+      alert(`Render error: ${e.message}`);
     } finally {
-      btn.innerHTML = origText;
       btn.disabled = false;
+      progressEl.style.display = 'none';
+    }
+  }
+
+  async openExportFolder() {
+    if (!this.lastRenderedPath) return;
+    try {
+      const res = await fetch('/api/system/open-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: this.lastRenderedPath })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Could not open folder: ${err.detail}`);
+      }
+    } catch (e) {
+      alert(`Open folder error: ${e.message}`);
     }
   }
 
   async saveAsNativeDialog() {
-    if (!this.currentProjectId || !this.activeClip) return;
+    if (!this.activeClip) return;
     try {
       const res = await fetch(`/api/exports/${this.currentProjectId}/${this.activeClip.id}/save-dialog`, {
         method: 'POST'
       });
       const data = await res.json();
       if (data.status === 'saved') {
+        this.lastRenderedPath = data.path;
         document.getElementById('exportSavedPathText').textContent = `Saved to: ${data.path}`;
-        alert(`🎉 Successfully saved clip to:\n${data.path}`);
+        alert(`Saved successfully to:\n${data.path}`);
       }
     } catch (e) {
-      alert(`Save As failed: ${e.message}`);
+      alert(`Save As error: ${e.message}`);
     }
   }
 
   // =========================================================================
-  // AI Settings Modal
+  // AI Settings Modal (Header)
   // =========================================================================
 
-  async openAiModal() {
+  openAiModal() {
     const modal = document.getElementById('aiSettingsModal');
     modal.classList.add('active');
-    await this.loadAiConfig();
     this.refreshOllamaModels();
   }
 
   switchAiTab(tab) {
-    const localBtn = document.getElementById('tabBtnLocalAi');
-    const apiBtn = document.getElementById('tabBtnApiAi');
-    const localContent = document.getElementById('tabContentLocalAi');
-    const apiContent = document.getElementById('tabContentApiAi');
+    const btnLocal = document.getElementById('tabBtnLocalAi');
+    const btnApi = document.getElementById('tabBtnApiAi');
+    const contentLocal = document.getElementById('tabContentLocalAi');
+    const contentApi = document.getElementById('tabContentApiAi');
 
     if (tab === 'local') {
-      localBtn.classList.add('active');
-      apiBtn.classList.remove('active');
-      localContent.style.display = 'block';
-      apiContent.style.display = 'none';
+      btnLocal.classList.add('active');
+      btnApi.classList.remove('active');
+      contentLocal.style.display = 'block';
+      contentApi.style.display = 'none';
     } else {
-      apiBtn.classList.add('active');
-      localBtn.classList.remove('active');
-      apiContent.style.display = 'block';
-      localContent.style.display = 'none';
-    }
-  }
-
-  async loadAiConfig() {
-    try {
-      const res = await fetch('/api/ai/config');
-      const cfg = await res.json();
-
-      this.switchAiTab(cfg.mode === 'api' ? 'api' : 'local');
-
-      // Local
-      document.getElementById('aiOllamaUrlInput').value = cfg.ollama_url || 'http://localhost:11434';
-
-      // API
-      document.getElementById('selApiProvider').value = cfg.provider === 'openrouter' ? 'openrouter' : 'deepseek';
-      this.handleApiProviderChange();
-
-      if (cfg.provider === 'openrouter') {
-        document.getElementById('aiApiUrlInput').value = cfg.openrouter_url || 'https://openrouter.ai/api/v1';
-        document.getElementById('aiApiModelInput').value = cfg.openrouter_model || 'deepseek/deepseek-chat';
-        document.getElementById('aiApiKeyInput').value = cfg.openrouter_key_masked || '';
-      } else {
-        document.getElementById('aiApiUrlInput').value = cfg.deepseek_url || 'https://api.deepseek.com/v1';
-        document.getElementById('aiApiModelInput').value = cfg.deepseek_model || 'deepseek-chat';
-        document.getElementById('aiApiKeyInput').value = cfg.deepseek_key_masked || '';
-      }
-
-      this.updateAiHeaderPill(cfg.mode, cfg.provider, cfg.ollama_model);
-    } catch (e) {
-      console.warn('AI config load failed:', e);
+      btnApi.classList.add('active');
+      btnLocal.classList.remove('active');
+      contentApi.style.display = 'block';
+      contentLocal.style.display = 'none';
     }
   }
 
   handleApiProviderChange() {
     const prov = document.getElementById('selApiProvider').value;
-    const urlIn = document.getElementById('aiApiUrlInput');
-    const modelIn = document.getElementById('aiApiModelInput');
+    const urlInput = document.getElementById('aiApiUrlInput');
+    const modelInput = document.getElementById('aiApiModelInput');
     const hint = document.getElementById('apiModelHint');
 
     if (prov === 'deepseek') {
-      urlIn.value = 'https://api.deepseek.com/v1';
-      modelIn.value = 'deepseek-chat';
+      urlInput.value = 'https://api.deepseek.com/v1';
+      modelInput.value = 'deepseek-chat';
       hint.innerHTML = 'Default: <code>deepseek-chat</code>';
     } else {
-      urlIn.value = 'https://openrouter.ai/api/v1';
-      modelIn.value = 'deepseek/deepseek-chat';
-      hint.innerHTML = 'Default: <code>deepseek/deepseek-chat</code> or <code>meta-llama/llama-3.2-3b-instruct:free</code>';
+      urlInput.value = 'https://openrouter.ai/api/v1';
+      modelInput.value = 'deepseek/deepseek-chat';
+      hint.innerHTML = 'Default: <code>deepseek/deepseek-chat</code>';
     }
   }
 
@@ -876,8 +1418,8 @@ class AppController {
         badge.textContent = `Online (${data.models.length} models)`;
         badge.className = 'tag local';
 
-        if (data.models && data.models.length > 0) {
-          sel.innerHTML = data.models.map(m => `<option value="${m}">${m} ${m === data.recommended ? '(Recommended)' : ''}</option>`).join('');
+        if (data.model_details && data.model_details.length > 0) {
+          sel.innerHTML = data.model_details.map(m => `<option value="${m.name}">${m.name} — ${m.size} (${m.ram}) ${m.recommended ? '★ RECOMMENDED' : ''}</option>`).join('');
           if (data.recommended) sel.value = data.recommended;
         } else {
           sel.innerHTML = '<option value="">(No models installed - heuristics will run)</option>';
@@ -928,7 +1470,8 @@ class AppController {
 
     const payload = {
       mode: isApi ? 'api' : 'local',
-      provider: prov
+      provider: prov,
+      configured: true
     };
 
     if (isApi) {
@@ -964,7 +1507,7 @@ class AppController {
   }
 
   // =========================================================================
-  // Storage Modal
+  // Storage & Projects Modal
   // =========================================================================
 
   async openStorageModal() {
@@ -1014,10 +1557,6 @@ class AppController {
       alert(`Cleanup failed: ${e.message}`);
     }
   }
-
-  // =========================================================================
-  // Projects Modal
-  // =========================================================================
 
   async openProjectsModal() {
     const modal = document.getElementById('projectsModal');

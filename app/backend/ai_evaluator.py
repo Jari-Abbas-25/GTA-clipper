@@ -31,6 +31,15 @@ OPENROUTER_DEFAULT_URL = "https://openrouter.ai/api/v1"
 
 RECOMMENDED_OLLAMA_MODELS = ["llama3.2:3b", "llama3.2", "qwen2.5:3b", "phi3.5", "gemma2:2b", "mistral"]
 
+OLLAMA_MODEL_SPECS = {
+    "llama3.2:3b": {"size": "2.0 GB", "ram": "~2.8 GB RAM", "desc": "Fast 3B model (Meta) - CPU-first recommended"},
+    "llama3.2": {"size": "2.0 GB", "ram": "~2.8 GB RAM", "desc": "Fast 3B model (Meta)"},
+    "qwen2.5:3b": {"size": "1.9 GB", "ram": "~2.5 GB RAM", "desc": "High quality 3B gaming reasoning (Alibaba)"},
+    "phi3.5": {"size": "2.2 GB", "ram": "~3.0 GB RAM", "desc": "Lightweight 3.8B model (Microsoft)"},
+    "gemma2:2b": {"size": "1.6 GB", "ram": "~2.2 GB RAM", "desc": "Ultra-lightweight 2B model (Google)"},
+    "mistral": {"size": "4.1 GB", "ram": "~5.5 GB RAM", "desc": "7B model (higher RAM requirement)"},
+}
+
 
 @dataclass
 class CandidateEvaluation:
@@ -55,6 +64,7 @@ def _mask_key(key: str | None) -> str:
 def load_ai_config() -> dict[str, Any]:
     """Load AI configuration, returning masked API keys for public/frontend consumption."""
     default_config: dict[str, Any] = {
+        "configured": False,
         "mode": "local",  # "local" or "api"
         "provider": "ollama",  # "ollama", "deepseek", "openrouter", "heuristics"
         "ollama_url": OLLAMA_DEFAULT_URL,
@@ -78,6 +88,7 @@ def load_ai_config() -> dict[str, Any]:
         
         cfg = default_config.copy()
         cfg.update({k: v for k, v in data.items() if k not in ["deepseek_key", "openrouter_key"]})
+        cfg["configured"] = bool(data.get("configured", False))
         
         # Check keys securely
         ds_key = data.get("deepseek_key", "")
@@ -134,10 +145,13 @@ def save_ai_config(updates: dict[str, Any]) -> dict[str, Any]:
     # Update other fields
     for k in [
         "mode", "provider", "ollama_url", "ollama_model",
-        "deepseek_url", "deepseek_model", "openrouter_url", "openrouter_model"
+        "deepseek_url", "deepseek_model", "openrouter_url", "openrouter_model", "configured"
     ]:
         if k in updates and updates[k] is not None:
             current_data[k] = updates[k]
+
+    if "configured" not in updates and "provider" in updates:
+        current_data["configured"] = True
 
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -469,3 +483,110 @@ Respond with ONLY valid JSON with keys:
 
     # 3. Seamless Rule-Based Fallback
     return rule_based_evaluate(start, end, hype_score, reasons, transcript_text)
+
+
+def generate_ai_edit_suggestions(
+    start: float,
+    end: float,
+    peak: float,
+    reasons: list[dict] | None = None,
+    transcript_text: str = "",
+    facecam_region: dict | None = None,
+) -> list[dict[str, Any]]:
+    """Generate structured multi-section timeline editing arrangement for a highlight clip.
+    
+    Divides clip into intelligent layout transitions:
+    - Intro: Full gameplay build-up
+    - Climax/Peak: Split-screen streamer reaction when excitement or chat spike occurs
+    - Follow-up: Action zoom or PIP
+    - Outro: Full-screen / blurred fit
+    """
+    duration = max(5.0, round(end - start, 2))
+    peak_offset = max(1.0, min(duration - 1.0, round(peak - start, 2)))
+    fc = facecam_region or {"x": 0.72, "y": 0.06, "w": 0.24, "h": 0.28}
+
+    fc_x = float(fc.get("x", 0.72))
+    fc_y = float(fc.get("y", 0.06))
+    fc_w = float(fc.get("w", 0.24))
+    fc_h = float(fc.get("h", 0.28))
+
+    sections: list[dict[str, Any]] = []
+
+    # Dynamic boundary generation based on clip duration and peak location
+    if duration <= 18.0:
+        # 2 Sections: Build-up -> Climax Reaction
+        t_split = max(3.0, min(duration - 3.0, peak_offset - 1.0))
+        sec_defs = [
+            (0.0, t_split, "crop", "Build-up Gameplay", 1.0, False),
+            (t_split, duration, "split", "Peak Reaction", 1.0, True),
+        ]
+    elif duration <= 35.0:
+        # 3 Sections: Setup -> Reaction -> Action Zoom
+        t1 = max(4.0, min(duration - 12.0, peak_offset - 3.0))
+        t2 = min(duration - 4.0, max(t1 + 6.0, peak_offset + 5.0))
+        sec_defs = [
+            (0.0, t1, "crop", "Full Gameplay Intro", 1.0, False),
+            (t1, t2, "split", "Streamer Hype Reaction", 1.0, True),
+            (t2, duration, "crop", "Action Zoom Climax", 1.35, False),
+        ]
+    else:
+        # 4 Sections: Setup -> Reaction -> Action PIP -> Outro Fit
+        t1 = max(5.0, min(duration - 20.0, peak_offset - 4.0))
+        t2 = min(duration - 14.0, max(t1 + 7.0, peak_offset + 4.0))
+        t3 = min(duration - 5.0, t2 + 8.0)
+        sec_defs = [
+            (0.0, t1, "crop", "Story Setup", 1.0, False),
+            (t1, t2, "split", "Peak Climax Reaction", 1.0, True),
+            (t2, t3, "pip", "Intense Action Focus", 1.25, True),
+            (t3, duration, "fit", "Outro Aftermath", 1.0, False),
+        ]
+
+    for idx, (s_start, s_end, layout, label, zoom, streamer_on) in enumerate(sec_defs):
+        sec_id = f"sec_{idx + 1}"
+        is_split = (layout == "split")
+        is_pip = (layout == "pip")
+
+        # Gameplay properties
+        gameplay_props = {
+            "x": 0.0,
+            "y": 0.40 if is_split else 0.0,
+            "w": 1.0,
+            "h": 0.60 if is_split else 1.0,
+            "zoom": zoom,
+            "pan_x": 0.5,
+            "pan_y": 0.5,
+            "border_w": 0,
+            "border_color": "#24324a",
+            "corner_radius": 0,
+        }
+
+        # Streamer properties
+        streamer_props = {
+            "enabled": streamer_on,
+            "x": 0.0 if is_split else (0.65 if is_pip else 0.70),
+            "y": 0.0 if is_split else (0.05 if is_pip else 0.06),
+            "w": 1.0 if is_split else (0.30 if is_pip else 0.24),
+            "h": 0.40 if is_split else (0.24 if is_pip else 0.28),
+            "zoom": 1.0,
+            "crop_x": fc_x,
+            "crop_y": fc_y,
+            "crop_w": fc_w,
+            "crop_h": fc_h,
+            "border_w": 2 if (is_split or is_pip) else 0,
+            "border_color": "#fbbf24" if is_pip else "#24324a",
+            "corner_radius": 8 if is_pip else 0,
+            "z_index": 2,
+        }
+
+        sections.append({
+            "id": sec_id,
+            "start": round(s_start, 2),
+            "end": round(s_end, 2),
+            "layout": layout,
+            "label": label,
+            "gameplay": gameplay_props,
+            "streamer": streamer_props,
+            "background": {"type": "blur", "color": "#000000"},
+        })
+
+    return sections

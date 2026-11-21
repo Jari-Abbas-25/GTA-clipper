@@ -67,6 +67,51 @@
               </div>
             </div>
           </div>
+
+          <!-- Analysis Options Drawer -->
+          <div class="analysis-options-drawer">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 13px; font-weight: 700; color: var(--text-main);">⚙️ Highlight Detection Tuning</span>
+              <span style="font-size: 11px; color: var(--text-muted);">Configure target candidates & sensitivity</span>
+            </div>
+            <div class="options-grid">
+              <div>
+                <label class="field-label">Target Highlights:</label>
+                <select id="selTargetCount" class="text-input" style="width: 100%;">
+                  <option value="4">4 strong clips</option>
+                  <option value="6" selected>6 strong clips (Recommended)</option>
+                  <option value="8">8 clips</option>
+                  <option value="12">12 clips</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label">Sensitivity:</label>
+                <select id="selSensitivity" class="text-input" style="width: 100%;">
+                  <option value="low">Low (Only massive peaks)</option>
+                  <option value="medium" selected>Medium (Balanced)</option>
+                  <option value="high">High (Catch subtle moments)</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label">Focus Mode:</label>
+                <select id="selFocusMode" class="text-input" style="width: 100%;">
+                  <option value="all" selected>All Highlights (General)</option>
+                  <option value="action">Action / Loudness Spikes</option>
+                  <option value="funny">Funny / Laughter & KEKW</option>
+                  <option value="story">Story & Dialogue Context</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label">Clip Duration Window:</label>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <input type="number" id="inpMinDur" class="text-input" value="15" min="10" max="45" style="width: 60px;" title="Min seconds">
+                  <span style="color: var(--text-muted); font-size: 12px;">to</span>
+                  <input type="number" id="inpMaxDur" class="text-input" value="45" min="25" max="90" style="width: 60px;" title="Max seconds">
+                  <span style="color: var(--text-muted); font-size: 12px;">sec</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="setup-divider"><span>OR OFFLINE DEMONSTRATION</span></div>
@@ -117,7 +162,7 @@
           </div>
         </div>
         <div style="display: flex; gap: 10px;">
-          <button class="btn btn-danger btn-sm" id="btnReanalyze">Re-Analyze</button>
+          <button class="btn btn-sm" id="btnReanalyze">⚙️ Re-Analyze Stream</button>
           <button class="btn btn-gold" id="btnEditTopHighlight">⚡ Edit Top Highlight</button>
         </div>
       </div>
@@ -133,43 +178,61 @@
         </div>
       </div>
 
-      <!-- Candidates Grid -->
-      <h3 style="font-size: 16px; margin-bottom: 16px;">Detected Highlight Candidates</h3>
+      <!-- Candidates Header & Grid -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 16px; margin: 0;">Detected Highlight Candidates</h3>
+        <span style="font-size: 13px; color: var(--text-muted);">Review and customize candidates before editing</span>
+      </div>
       <div id="candidatesGrid" class="candidates-grid">
         <!-- Rendered dynamically -->
       </div>
     </section>
 
-    <!-- 3. INTEGRATED 9:16 CANVAS EDITOR VIEW -->
+    <!-- 3. INTEGRATED TIMELINE CANVAS EDITOR VIEW -->
     <section id="editorView" class="view-section">
-      <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+      <!-- Editor Header -->
+      <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
         <div style="display: flex; align-items: center; gap: 12px;">
           <button class="btn btn-sm" id="btnBackToHighlights">← Back to Highlights</button>
-          <h2 id="editorClipTitle" style="font-size: 18px; font-weight: 700;">Clip Editor (c01)</h2>
+          <input type="text" id="editorClipTitleInput" class="text-input" style="font-size: 16px; font-weight: 700; width: 280px;" value="Clip Title">
         </div>
+
+        <!-- Canvas Aspect Ratio Switcher -->
+        <div class="aspect-pill-group">
+          <button class="aspect-pill active" id="btnAspect916" data-aspect="9:16">📱 9:16 Portrait</button>
+          <button class="aspect-pill" id="btnAspect169" data-aspect="16:9">🖥️ 16:9 Landscape</button>
+        </div>
+
         <div style="display: flex; gap: 10px;">
-          <button class="btn btn-sm" id="btnSaveClipSettings">💾 Save Settings</button>
-          <button class="btn btn-gold" id="btnExportClip">🚀 Render 1080x1920 MP4</button>
+          <button class="btn btn-sm" id="btnSaveClipSettings">💾 Save Progress</button>
+          <button class="btn btn-gold" id="btnOpenExportModal">🚀 Export Video...</button>
         </div>
       </div>
 
-      <!-- Export Success Bar with Save As & Download actions -->
+      <!-- Export Success Bar with Actions -->
       <div id="exportSuccessBar" class="export-success-box" style="display: none;">
         <div class="export-success-info">
           <span>🎉 <strong>Render Complete!</strong> <span id="exportedFilename">clip.mp4</span> (<span id="exportedSize">0 MB</span>)</span>
           <div id="exportSavedPathText" style="font-size: 11px; color: var(--accent-green); margin-top: 2px;"></div>
         </div>
         <div style="display: flex; gap: 8px;">
-          <button class="btn btn-primary btn-sm" id="btnSaveAsNative">💾 Save As (Choose Folder)</button>
-          <a class="btn btn-sm" id="btnDownloadExport" href="#" download>⬇️ Download MP4</a>
+          <button class="btn btn-sm btn-primary" id="btnOpenExportFolder">📁 Open Folder</button>
+          <button class="btn btn-sm" id="btnSaveAsNative">💾 Save As...</button>
+          <a class="btn btn-sm" id="btnDownloadExport" href="#" download>⬇️ Download</a>
         </div>
       </div>
 
+      <!-- 3-Column Editor Layout -->
       <div class="editor-layout">
-        <!-- Left: 9:16 Canvas Preview -->
+
+        <!-- Column 1: Video Preview Canvas -->
         <div class="preview-pane">
-          <h3>9:16 VERTICAL PREVIEW</h3>
-          <div class="canvas-wrapper">
+          <div style="display: flex; justify-content: space-between; width: 100%; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin: 0; font-size: 14px;" id="canvasTitleText">CANVAS PREVIEW (9:16)</h3>
+            <span style="font-size: 11px; color: var(--text-muted);">Click element to drag/resize</span>
+          </div>
+
+          <div class="canvas-wrapper" id="canvasWrapper">
             <canvas id="editorCanvas" width="360" height="640"></canvas>
             <div id="facecamOverlayBox" class="facecam-bounding-box">
               <div class="facecam-handle nw handle"></div>
@@ -178,47 +241,78 @@
               <div class="facecam-handle se handle"></div>
             </div>
           </div>
+
           <div class="canvas-controls-bar">
             <button class="btn btn-sm" id="btnCanvasPlayPause">⏯️ Play / Pause</button>
-            <button class="btn btn-sm" id="btnResetCanvasTime">⏮️ Start</button>
+            <button class="btn btn-sm" id="btnResetCanvasTime">⏮️ Rewind</button>
           </div>
         </div>
 
-        <!-- Center: Playback & Timeline Scrubber -->
+        <!-- Column 2: Playback & Multi-Section Timeline -->
         <div class="center-pane">
           <div class="playback-card">
             <video id="sourceVideo" preload="metadata" playsinline></video>
           </div>
 
+          <!-- Multi-Section Timeline Card -->
           <div class="timeline-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 13px; font-weight: 700;">⏱️ Multi-Section Timeline</span>
+              <div style="font-size: 12px; color: var(--text-muted);">
+                Clip: <b id="editorCurrentTimeText">0.0s</b> / <b id="editorDurationText">30.0s</b>
+              </div>
+            </div>
+
+            <!-- Time Ruler -->
+            <div class="timeline-ruler-container" id="timelineRuler">
+              <!-- Dynamically populated with second marks -->
+            </div>
+
+            <!-- Multi-Section Visual Blocks Track -->
+            <div class="timeline-sections-track" id="timelineSectionsTrack">
+              <!-- Dynamically populated with section blocks -->
+            </div>
+
+            <!-- Playhead Scrubber -->
             <div class="timeline-scrubber" id="timelineScrubber">
               <div class="scrubber-track" id="scrubberTrack"></div>
               <div class="scrubber-playhead" id="scrubberPlayhead"></div>
             </div>
 
-            <div class="trim-controls-row">
-              <div>
-                <label class="field-label">Clip Start (seconds):</label>
-                <input type="number" id="trimStartInput" class="text-input" step="0.5" style="width: 100%;">
-                <div class="nudge-buttons">
-                  <button class="btn btn-sm" id="btnNudgeStartMinus1">-1s</button>
-                  <button class="btn btn-sm" id="btnNudgeStartPlus1">+1s</button>
-                </div>
+            <!-- Timeline Editing Operations Row -->
+            <div class="timeline-actions-row">
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-sm" id="btnSplitSection" title="Split current timeline section at video playhead">✂️ Split at Playhead</button>
+                <button class="btn btn-sm btn-danger" id="btnDeleteSection" title="Delete selected section and merge">🗑️ Delete Section</button>
+                <button class="btn btn-sm btn-gold" id="btnAiSuggestEdits" title="Generate AI multi-layout transition arrangement">⚡ AI Edit Suggestions</button>
               </div>
-
-              <div>
-                <label class="field-label">Clip End (seconds):</label>
-                <input type="number" id="trimEndInput" class="text-input" step="0.5" style="width: 100%;">
-                <div class="nudge-buttons">
-                  <button class="btn btn-sm" id="btnNudgeEndMinus1">-1s</button>
-                  <button class="btn btn-sm" id="btnNudgeEndPlus1">+1s</button>
-                </div>
-              </div>
+              <button class="btn btn-sm" id="btnResetSections" title="Reset timeline to single uniform layout">↺ Reset to Uniform</button>
             </div>
 
-            <div style="font-size: 13px; color: var(--text-muted); display: flex; justify-content: space-between;">
-              <span>Clip Duration: <b id="editorDurationText">30.0s</b></span>
-              <span>Current Time: <b id="editorCurrentTimeText">0.0s</b></span>
+            <!-- Section & Clip Trimming Row -->
+            <div class="trim-controls-row">
+              <div>
+                <label class="field-label">Active Section Range (seconds):</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <input type="number" id="secStartInput" class="text-input" step="0.5" style="width: 80px;">
+                  <span>to</span>
+                  <input type="number" id="secEndInput" class="text-input" step="0.5" style="width: 80px;">
+                  <button class="btn btn-sm" id="btnApplySecTrim">Apply</button>
+                </div>
+              </div>
+
+              <div>
+                <label class="field-label">Full Highlight Clip Window:</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <input type="number" id="trimStartInput" class="text-input" step="0.5" style="width: 80px;">
+                  <span>to</span>
+                  <input type="number" id="trimEndInput" class="text-input" step="0.5" style="width: 80px;">
+                  <div class="nudge-buttons">
+                    <button class="btn btn-sm" id="btnNudgeStartMinus1">-1s</button>
+                    <button class="btn btn-sm" id="btnNudgeEndPlus1">+1s</button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -232,54 +326,200 @@
           </div>
         </div>
 
-        <!-- Right: Layout & Settings Controls -->
+        <!-- Column 3: Properties Panel for Selected Element -->
         <div class="settings-pane">
-          <div class="settings-group">
-            <h4>📐 Layout Mode</h4>
-            <div class="layout-pill-selector">
-              <button class="layout-btn active" data-layout="split">Split-Screen</button>
-              <button class="layout-btn" data-layout="crop">9:16 Crop</button>
-              <button class="layout-btn" data-layout="fit">Blurred Fit</button>
-              <button class="layout-btn" data-layout="pip">Picture-in-Pic</button>
+          <!-- Property Tabs -->
+          <div class="prop-tabs">
+            <button class="prop-tab-btn active" id="tabPropGameplay">🎮 Gameplay</button>
+            <button class="prop-tab-btn" id="tabPropStreamer">📷 Streamer</button>
+            <button class="prop-tab-btn" id="tabPropLayout">📐 Layout</button>
+          </div>
+
+          <!-- Tab 1: Gameplay Element Controls -->
+          <div id="contentPropGameplay" class="prop-content active">
+            <div class="settings-group">
+              <h4>🎮 Gameplay Zoom & Framing</h4>
+              <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Independent zoom and focal pan for gameplay scene.</p>
+
+              <label class="field-label">Zoom Factor (<span id="txtGameplayZoom">1.0x</span>):</label>
+              <input type="range" id="gameplayZoomInput" min="1.0" max="3.0" step="0.05" value="1.0" style="width: 100%; margin-bottom: 12px;">
+
+              <label class="field-label">Horizontal Pan (Focus):</label>
+              <input type="range" id="gameplayPanXInput" min="0" max="1" step="0.05" value="0.5" style="width: 100%; margin-bottom: 12px;">
+
+              <label class="field-label">Vertical Position (Y):</label>
+              <input type="range" id="gameplayPosYInput" min="0" max="1" step="0.02" value="0.4" style="width: 100%; margin-bottom: 12px;">
+
+              <button class="btn btn-sm" id="btnResetGameplay" style="width: 100%;">↺ Reset Gameplay Framing</button>
             </div>
           </div>
 
-          <div class="settings-group">
-            <h4>📷 Facecam Controls</h4>
-            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Drag and resize the yellow box on the preview canvas to position streamer webcam.</p>
-            <button class="btn btn-sm" id="btnAutoDetectFacecam" style="width: 100%;">🎯 Auto-Detect Facecam</button>
+          <!-- Tab 2: Streamer / Facecam Controls -->
+          <div id="contentPropStreamer" class="prop-content" style="display: none;">
+            <div class="settings-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h4 style="margin: 0;">📷 Streamer Webcam</h4>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <input type="checkbox" id="chkStreamerEnabled" checked>
+                  <label for="chkStreamerEnabled" style="font-size: 12px;">Show Streamer</label>
+                </div>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Position, crop, border, and rounded corners for facecam box.</p>
+
+              <button class="btn btn-sm" id="btnAutoDetectFacecam" style="width: 100%; margin-bottom: 14px;">🎯 Auto-Detect Facecam</button>
+
+              <label class="field-label">Streamer Zoom (<span id="txtStreamerZoom">1.0x</span>):</label>
+              <input type="range" id="streamerZoomInput" min="1.0" max="2.5" step="0.05" value="1.0" style="width: 100%; margin-bottom: 12px;">
+
+              <label class="field-label">Border Width (<span id="txtStreamerBorder">2px</span>):</label>
+              <input type="range" id="streamerBorderInput" min="0" max="8" step="1" value="2" style="width: 100%; margin-bottom: 8px;">
+
+              <label class="field-label">Border Color:</label>
+              <div class="color-swatches">
+                <button class="swatch-btn active" data-color="#fbbf24" style="background: #fbbf24;"></button>
+                <button class="swatch-btn" data-color="#38bdf8" style="background: #38bdf8;"></button>
+                <button class="swatch-btn" data-color="#a855f7" style="background: #a855f7;"></button>
+                <button class="swatch-btn" data-color="#ffffff" style="background: #ffffff;"></button>
+              </div>
+
+              <label class="field-label" style="margin-top: 12px;">Corner Radius (<span id="txtStreamerRadius">0px</span>):</label>
+              <input type="range" id="streamerRadiusInput" min="0" max="24" step="2" value="0" style="width: 100%; margin-bottom: 14px;">
+
+              <button class="btn btn-sm" id="btnResetStreamer" style="width: 100%;">↺ Reset Streamer Box</button>
+            </div>
           </div>
 
-          <div class="settings-group">
-            <h4>🎮 Gameplay Framing</h4>
-            <label class="field-label">Horizontal Pan (Focus):</label>
-            <input type="range" id="panRangeInput" min="0" max="1" step="0.05" value="0.5" style="width: 100%; margin-bottom: 10px;">
-            <label class="field-label">Zoom Factor:</label>
-            <input type="range" id="zoomRangeInput" min="1.0" max="2.0" step="0.05" value="1.0" style="width: 100%;">
-          </div>
-
-          <div class="settings-group">
-            <h4>💬 Captions & Subtitles</h4>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-              <input type="checkbox" id="chkEnableCaptions" checked>
-              <label for="chkEnableCaptions" style="font-size: 13px;">Burn Subtitles into Clip</label>
+          <!-- Tab 3: Section Layout & Background -->
+          <div id="contentPropLayout" class="prop-content" style="display: none;">
+            <div class="settings-group">
+              <h4>📐 Section Layout Mode</h4>
+              <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Set layout for the currently selected timeline segment.</p>
+              <div class="layout-pill-selector">
+                <button class="layout-btn active" data-layout="split">Split-Screen</button>
+                <button class="layout-btn" data-layout="crop">Full Crop</button>
+                <button class="layout-btn" data-layout="fit">Blurred Fit</button>
+                <button class="layout-btn" data-layout="pip">Picture-in-Pic</button>
+              </div>
             </div>
 
-            <label class="field-label">Subtitle Style:</label>
-            <select id="selCaptionStyle" class="text-input" style="width: 100%; margin-bottom: 10px;">
-              <option value="bold">Bold TikTok (Gold Highlight)</option>
-              <option value="karaoke">Karaoke Animation</option>
-              <option value="clean">Clean Box</option>
-              <option value="minimal">Minimal</option>
-            </select>
+            <div class="settings-group">
+              <h4>🎨 Background Fill</h4>
+              <label class="field-label">Background Style:</label>
+              <select id="selBackgroundStyle" class="text-input" style="width: 100%;">
+                <option value="blur">Blurred Gameplay Fill</option>
+                <option value="black">Solid Black</option>
+                <option value="darkblue">Deep Blue (#0a0e17)</option>
+              </select>
+            </div>
+
+            <div class="settings-group">
+              <h4>💬 Captions & Subtitles</h4>
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                <input type="checkbox" id="chkEnableCaptions" checked>
+                <label for="chkEnableCaptions" style="font-size: 13px;">Burn Subtitles into Clip</label>
+              </div>
+
+              <label class="field-label">Subtitle Style:</label>
+              <select id="selCaptionStyle" class="text-input" style="width: 100%; margin-bottom: 10px;">
+                <option value="bold">Bold TikTok (Gold Highlight)</option>
+                <option value="karaoke">Karaoke Animation</option>
+                <option value="clean">Clean Box</option>
+                <option value="minimal">Minimal</option>
+              </select>
+            </div>
           </div>
         </div>
+
       </div>
     </section>
 
   </main>
 
-  <!-- AI Settings Modal -->
+  <!-- =========================================================================
+       MODALS
+       ========================================================================= -->
+
+  <!-- First-Launch AI Setup Modal (Mandatory Onboarding) -->
+  <div class="modal-backdrop" id="aiFirstLaunchModal">
+    <div class="modal-dialog first-launch-modal">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span class="first-launch-badge">Initial Setup</span>
+          <h3 style="margin: 0;">⚡ Welcome to GTA Clipper — Select AI Setup</h3>
+        </div>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 18px; line-height: 1.5;">
+          Choose whether your gaming highlights and editing arrangements are evaluated locally on your PC or using an external AI API.
+        </p>
+
+        <!-- Mode Selector Tabs -->
+        <div class="tab-selector" style="margin-bottom: 18px;">
+          <button class="tab-btn active" id="firstLaunchTabLocal">🖥️ OPTION A: LOCAL AI (Recommended / Free)</button>
+          <button class="tab-btn" id="firstLaunchTabApi">🌐 OPTION B: API AI (DeepSeek / OpenRouter)</button>
+        </div>
+
+        <!-- Local AI Content -->
+        <div id="firstLaunchContentLocal">
+          <div style="background: var(--bg-card); padding: 14px; border-radius: 8px; margin-bottom: 14px; border: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <strong>Ollama Daemon Status:</strong>
+              <span id="flOllamaBadge" class="tag">Checking...</span>
+            </div>
+            <label class="field-label">Ollama Host URL:</label>
+            <input type="text" id="flOllamaUrlInput" class="text-input" value="http://localhost:11434" style="width: 100%; margin-bottom: 10px;">
+
+            <label class="field-label">Installed Models (Size & RAM Requirements):</label>
+            <select id="flOllamaModelSelect" class="text-input" style="width: 100%; margin-bottom: 8px;">
+              <option value="">(Checking Ollama...)</option>
+            </select>
+            <div id="flModelReqInfo" style="font-size: 12px; color: var(--accent-gold); margin-top: 4px;">
+              Recommended for Core i5 CPU: <code>llama3.2:3b</code> (~2.0 GB size, ~2.8 GB RAM).
+            </div>
+          </div>
+
+          <div style="background: var(--bg-primary); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+            🛡️ <strong>Zero-Cost & CPU-First Guarantee:</strong><br>
+            • To install Ollama model, open terminal: <code>ollama pull llama3.2:3b</code><br>
+            • <code>faster-whisper INT8</code> and audio tagging run locally on your CPU with zero GPU requirement.<br>
+            • <strong>Heuristics Fallback:</strong> If Ollama is not installed or offline, rule-based gaming intelligence automatically evaluates all highlights without any errors or subscriptions.
+          </div>
+        </div>
+
+        <!-- API AI Content -->
+        <div id="firstLaunchContentApi" style="display: none;">
+          <div style="margin-bottom: 12px;">
+            <label class="field-label">Select API Provider:</label>
+            <select id="flApiProviderSelect" class="text-input" style="width: 100%;">
+              <option value="deepseek">DeepSeek API (api.deepseek.com)</option>
+              <option value="openrouter">OpenRouter API (openrouter.ai)</option>
+            </select>
+          </div>
+          <div style="margin-bottom: 12px;">
+            <label class="field-label">Model Name:</label>
+            <input type="text" id="flApiModelInput" class="text-input" value="deepseek-chat" style="width: 100%;">
+          </div>
+          <div style="margin-bottom: 16px;">
+            <label class="field-label">API Key:</label>
+            <input type="password" id="flApiKeyInput" class="text-input" placeholder="sk-..." style="width: 100%;">
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+              🔒 Keys are stored securely in local <code>.ai_config.json</code> on this machine only, never committed to Git.
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; background: var(--bg-card); padding: 10px; border-radius: 8px;">
+            <button class="btn btn-sm" id="btnFlTestConnection">🔌 Test API Connection</button>
+            <span id="flTestStatusText" style="font-size: 12px; color: var(--text-muted);">Not tested yet</span>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px;">
+          <button class="btn btn-primary" id="btnSaveFirstLaunchAi">Save & Start Clipping →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Settings Modal (Re-opened anytime from header) -->
   <div class="modal-backdrop" id="aiSettingsModal">
     <div class="modal-dialog" style="max-width: 600px;">
       <div class="modal-header">
@@ -288,7 +528,7 @@
       </div>
       <div class="modal-body">
         <p style="color: var(--text-muted); margin-bottom: 16px; font-size: 13px;">
-          Choose whether highlight moments are evaluated using your local machine (Ollama / offline heuristics) or an external API (DeepSeek / OpenRouter).
+          Change AI evaluation between Local AI (Ollama / offline heuristics) and API AI (DeepSeek / OpenRouter).
         </p>
 
         <!-- Mode Selector Tabs -->
@@ -314,7 +554,7 @@
             <select id="selOllamaModel" class="text-input" style="width: 100%; margin-bottom: 8px;">
               <option value="">(No models found)</option>
             </select>
-            <div style="font-size: 12px; color: var(--text-muted);">
+            <div id="ollamaModelDetailsText" style="font-size: 12px; color: var(--accent-gold); margin-top: 4px;">
               Recommended for Core i5: <code>llama3.2:3b</code> or <code>qwen2.5:3b</code>.
             </div>
           </div>
@@ -348,9 +588,6 @@
           <div style="margin-bottom: 12px;">
             <label class="field-label">Model Name:</label>
             <input type="text" id="aiApiModelInput" class="text-input" value="deepseek-chat" style="width: 100%;">
-            <div id="apiModelHint" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-              Default: <code>deepseek-chat</code> (or <code>meta-llama/llama-3.2-3b-instruct:free</code> on OpenRouter)
-            </div>
           </div>
 
           <div style="margin-bottom: 16px;">
@@ -358,9 +595,6 @@
             <div style="display: flex; gap: 8px;">
               <input type="password" id="aiApiKeyInput" class="text-input" placeholder="sk-..." style="flex: 1;">
               <button class="btn btn-sm" id="btnToggleApiKey">👁️</button>
-            </div>
-            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-              🔒 Keys are stored securely in local <code>.ai_config.json</code> on this machine only, never committed to Git.
             </div>
           </div>
 
@@ -373,6 +607,60 @@
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px;">
           <button class="btn" id="btnCancelAiModal">Cancel</button>
           <button class="btn btn-primary" id="btnSaveAiConfig">Save AI Settings</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Video Modal (With Destination Folder Selection) -->
+  <div class="modal-backdrop" id="exportModal">
+    <div class="modal-dialog" style="max-width: 580px;">
+      <div class="modal-header">
+        <h3>🚀 Export Final Video</h3>
+        <button class="btn btn-sm" id="btnCloseExportModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+          Render your multi-section edit into a high quality MP4 video. You can choose any destination folder on your computer.
+        </p>
+
+        <div style="margin-bottom: 14px;">
+          <label class="field-label">Resolution & Aspect Ratio:</label>
+          <select id="selExportResolution" class="text-input" style="width: 100%;">
+            <option value="1080x1920" selected>1080x1920 (9:16 Vertical Shorts/TikTok)</option>
+            <option value="1920x1080">1920x1080 (16:9 Landscape YouTube)</option>
+            <option value="720x1280">720x1280 (Fast Preview 9:16)</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <label class="field-label">Quality Preset:</label>
+          <select id="selExportQuality" class="text-input" style="width: 100%;">
+            <option value="20" selected>High Quality (CRF 20, veryfast)</option>
+            <option value="18">Maximum Quality (CRF 18)</option>
+            <option value="24">Fast Export (CRF 24)</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label class="field-label">Destination Folder / Filename (Choose where to save):</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="exportDestPathInput" class="text-input" placeholder="Choose a folder on your PC or leave empty for exports/ folder..." style="flex: 1;">
+            <button class="btn btn-primary btn-sm" id="btnBrowseExportDest">📂 Browse...</button>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+            💡 Click Browse to open the Windows Save As dialog and select any folder.
+          </div>
+        </div>
+
+        <div id="exportRenderProgress" style="display: none; margin-bottom: 14px;">
+          <div style="font-size: 13px; color: var(--accent); margin-bottom: 6px;">Rendering clip with FFmpeg...</div>
+          <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: 100%;"></div></div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px;">
+          <button class="btn" id="btnCancelExportModal">Cancel</button>
+          <button class="btn btn-gold" id="btnStartRenderExport">Start Export</button>
         </div>
       </div>
     </div>

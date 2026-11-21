@@ -181,30 +181,28 @@ Processing begins **only** when the user pastes a URL and clicks **Start Process
 
 ## 5. AI Provider Selection (First Launch) ✅
 
-On first launch (or by clicking the ⚙️ **AI Settings** button), the user selects one of four AI modes:
+When a user opens GTA Clipper for the first time (detected by `!aiConfig || !aiConfig.configured`), an **AI Setup Onboarding Modal** is displayed before asking for a video URL.
 
-### Local AI tab
+The user selects between two primary options:
 
-| Option | Description |
+### Option A: Local AI (Recommended & Zero Cost)
+
+| Provider | Description |
 |---|---|
-| **Ollama (default)** | Connects to local Ollama at `http://localhost:11434`. The UI auto-discovers available models and shows a dropdown. Recommended models: `llama3.2:3b`, `qwen2.5:3b`. |
-| **Heuristics** | Rule-based gaming keyword matching, chat signals, and audio dynamics. Zero dependencies, fully offline, always available. |
+| **Ollama** | Connects to local Ollama at `http://localhost:11434`. The backend queries `GET /api/ai/ollama/models` which retrieves all installed models along with disk sizes and estimated RAM requirements. Recommended CPU-first model: `llama3.2:3b` (~2.0 GB disk, ~2.8 GB RAM). |
+| **Heuristics Fallback** | When Ollama is not installed or running, the system falls back seamlessly to rule-based signal heuristics (audio dynamics, chat bursts, keyword tagging). Zero cost, 100% offline, no setup required. |
 
-### API AI tab
+### Option B: Cloud API AI
 
-| Option | Description |
+| Provider | Description |
 |---|---|
-| **DeepSeek** | Uses DeepSeek Chat API (`deepseek-chat` model). Requires a DeepSeek API key (free tier available). |
-| **OpenRouter** | Routes to any supported model via OpenRouter. Requires an OpenRouter API key. Default model: `deepseek/deepseek-chat`. |
+| **DeepSeek** | Uses DeepSeek Chat API (`deepseek-chat` model). Requires an API key. Includes live test connection button. |
+| **OpenRouter** | Routes to any chosen LLM via OpenRouter. Requires an API key. |
 
 > [!NOTE]
-> API keys are stored locally in `.ai_config.json` at the project root.
-> This file is git-ignored. Keys are masked in the UI (e.g. `sk-****...abcd`).
-> `keyring` is not used — keys are stored in plain JSON.
+> API keys are stored locally in `.ai_config.json` at the project root. This file is git-ignored and never committed. Keys are masked in the UI (e.g. `sk-****...abcd`).
 
-The **Test Connection** button verifies connectivity to the selected provider before saving.
-
-If Ollama is not running, the backend automatically falls back to heuristics — the application never crashes due to AI unavailability.
+The AI configuration can be reopened and changed at any time by clicking the ⚙️ **AI Settings** button in the dashboard header.
 
 ---
 
@@ -496,36 +494,52 @@ Candidates are ranked by final hype score (0–100). The dashboard displays:
 
 ---
 
-## 19. The 9:16 Canvas Editor 🟡
+## 19. The Canvas & Multi-Section Timeline Video Editor ✅
 
-Implemented in `app/frontend/canvas_editor.js`.
+Implemented in `app/frontend/canvas_editor.js` and `app/frontend/app.js`.
 
-The editor opens when the user clicks **Edit 9:16** on any candidate.
+The editor opens when the user clicks **Edit 9:16** on any candidate card.
 
-Features:
-- **60fps HTML5 Canvas** real-time preview at 360×640 (preview) → 1080×1920 (export)
-- **Playback**: play/pause the clip in the preview
-- **Layout switcher**: switch between 4 layouts without re-rendering
-- **Facecam bounding box**: drag & resize the yellow box to frame the webcam
-- **Gameplay pan**: horizontal pan slider to focus on gameplay area
-- **Zoom**: 1.0× – 2.5× zoom on the gameplay region
-- **Subtitle overlay**: word-by-word active highlighting
-- **Clip settings persistence**: all edits auto-saved to `projects/<id>/clip_settings/<cid>.json`
+### Key Capabilities:
+- **Aspect Ratio Switcher**: One-click toggling between **9:16 Portrait** (1080×1920) and **16:9 Landscape** (1920×1080) with real-time responsive canvas preview.
+- **Multi-Section Timeline**:
+  - Time ruler with formatted timecodes and visual tick marks.
+  - Interactive, color-coded section blocks across the duration of the clip.
+  - Drag-to-seek playhead that tracks playback frame-accurately.
+  - **Split Section at Playhead** (`Ctrl+B` or Split button) to divide any section into two independent layout zones.
+  - **Delete Section** to remove unnecessary sections and automatically bridge boundaries.
+  - **Section Start / End trimming** with fine-grained numeric precision.
+- **⚡ AI Edit Suggestions**:
+  - Automatically calculates narrative transitions based on audio dynamics and chat spikes (e.g. Intro Full Gameplay → Peak Streamer Reaction → Action Zoom → Outro Blurred Fit).
+  - Re-generate anytime with the "AI Edit Suggestions" button (`POST /api/projects/{id}/clips/{cid}/ai-edit-suggestions`).
+- **Independent Gameplay Controls**:
+  - Zoom 1.0× – 3.0× on gameplay action.
+  - Pan X and Pan Y positioning.
+  - Border thickness and border color swatches.
+  - Corner radius rounding.
+- **Independent Streamer Webcam Controls**:
+  - Enable or disable webcam element per section.
+  - Interactive canvas dragging and corner-handle resizing anywhere on the screen.
+  - Direct crop framing adjustment (Crop X, Y, Width, Height) to frame the streamer cleanly.
+  - Streamer Zoom 1.0× – 2.5× inside the crop.
+  - Border width, border color swatches, corner radius, and Z-index layering.
+- **TikTok-Style Subtitles**: Real-time word-by-word highlighted preview with customizable styles and fonts.
+- **Clip settings persistence**: All multi-section timeline states auto-saved to `projects/<id>/clip_settings/<cid>.json`.
 
 ---
 
-## 20. Layout Modes ✅
+## 20. Layout Modes & Transitions ✅
 
-All four layouts tested and verified at 1080×1920.
+All four layouts tested and verified at both 1080×1920 portrait and 1920×1080 landscape resolutions.
 
-| Layout | Description | Tested file size |
-|---|---|---|
-| **split** | Facecam top ~40% (768px) + Gameplay bottom ~60% (1152px) | 137 KB |
-| **fit** | 16:9 gameplay centered, blurred gameplay background fill | 534 KB |
-| **crop** | Full 9:16 crop of gameplay with adjustable pan/zoom | 166 KB |
-| **pip** | Full gameplay with floating facecam overlay | 168 KB |
+| Layout | Description |
+|---|---|
+| **split** | Streamer webcam top panel + Gameplay bottom panel with customizable height ratio |
+| **fit** | Center gameplay frame surrounded by dynamically blurred gameplay background fill |
+| **crop** | Full aspect-ratio fill of gameplay with adjustable horizontal/vertical pan & zoom |
+| **pip** | Full gameplay background with floating, draggable, customizable streamer webcam overlay |
 
-Layout math lives in `app/backend/renderer.py` and mirrors the Canvas preview exactly.
+Multi-section clips can combine any sequence of these layouts (e.g. Section 1: Crop → Section 2: Split → Section 3: PIP → Section 4: Fit).
 
 ---
 
@@ -542,14 +556,13 @@ Generated by `app/backend/transcriber.py` as `.ass` subtitle files, burned in by
 
 ---
 
-## 22. Clip Trimming 🟡
+## 22. Clip Trimming & Section Boundaries ✅
 
 The editor provides:
 - **Start time** and **End time** inputs (editable text fields)
-- **−1s / +1s nudge buttons** for start and end
-- **Timeline scrubber** — click to seek
-
-Trim boundaries are stored in `clip_settings/<cid>.json` and passed to the renderer.
+- **−1s / +1s nudge buttons** for clip start and end
+- **Timeline scrubber** — click or drag to seek
+- **Per-section boundary adjustments** allowing seamless multi-scene editing within the same highlight clip.
 
 ---
 
@@ -557,48 +570,26 @@ Trim boundaries are stored in `clip_settings/<cid>.json` and passed to the rende
 
 Implemented in `app/backend/renderer.py`.
 
-Triggered by clicking **Export 1080×1920 MP4** in the editor, or via `POST /api/projects/{pid}/clips/{cid}/render`.
+Triggered by clicking **Export Video** in the editor or export modal (`POST /api/projects/{pid}/clips/{cid}/render`).
 
-### Export parameters
-
-| Parameter | Value |
-|---|---|
-| Output resolution | 1080×1920 |
-| Video codec | `libx264` (CPU) |
-| Audio codec | `aac` |
-| Pixel format | `yuv420p` |
-| Subtitle burn-in | FFmpeg `ass` filter |
-| Output path | `exports/<project_id>/<cid>_<title>.mp4` |
-
-### Layout FFmpeg filter chains
-
-- **split**: `[v]scale...pad...overlay` with two video regions
-- **fit**: `[v]scale,boxblur,scale,overlay` centered on blurred background
-- **crop**: `[v]crop,scale` with pan offset
-- **pip**: `[v]scale,overlay` with PiP at corner position
+### Multi-Section Filtergraph Architecture:
+1. Trims each timeline section with `trim=start=...:end=...,setpts=PTS-STARTPTS`.
+2. Splits inputs with `split=2` for multi-source layouts (`split`, `fit`, `pip`) to avoid stream reuse conflicts.
+3. Applies layout scaling, cropping, blurring, and overlays.
+4. Normalizes Sample Aspect Ratio with `setsar=1` on every branch.
+5. Concatenates all section streams seamlessly using `concat=n=N:v=1:a=0`.
+6. Burns in ASS subtitle segments and encodes via `libx264` + `aac`.
 
 ---
 
-## 24. Save As Dialog (Windows) ✅
+## 24. Export Destination & Native File Management ✅
 
-After rendering, clicking **Save As…** triggers `POST /api/exports/{pid}/{cid}/save-dialog`.
+GTA Clipper allows rendering or saving finished clips anywhere on the user's computer:
 
-The backend spawns a subprocess running a Python `tkinter` file dialog:
-```python
-tkinter.filedialog.asksaveasfilename(
-    defaultextension=".mp4",
-    filetypes=[("MP4 Video", "*.mp4"), ("All Files", "*.*")],
-    initialfile="<clip_title>.mp4"
-)
-```
-
-The chosen path is returned to the frontend, which then calls `POST /api/exports/{pid}/{cid}/save-to-path` to copy the file.
-
-> [!NOTE]
-> The subprocess approach is used for thread safety (Tkinter requires the main thread).
-> The dialog takes ~1–2s to appear — this is expected.
-
-> ⚠️ **Known limitation**: Save As dialog requires a desktop environment (Windows GUI). It does not work in headless/server environments.
+- **Custom Destination Path**: In the Export modal, users can select any folder on their computer before or during rendering.
+- **Native Windows Browse Dialog**: Clicking "Browse" opens the native Windows folder selector (`POST /api/system/browse-save-path`) without locking the application.
+- **Open Containing Folder**: Clicking "Open Containing Folder" (`POST /api/system/open-folder`) opens Windows File Explorer with the exported video highlighted.
+- **Save As Dialog**: Post-render native file dialog (`POST /api/exports/{pid}/{cid}/save-dialog`).
 
 ---
 
@@ -699,16 +690,20 @@ This endpoint:
 | `POST` | `/api/projects/create-demo` | Create demo project from fixtures |
 | `GET` | `/api/projects/{id}/stream` | HTTP Range streaming of source video |
 | `GET` | `/api/projects/{id}/frame` | Thumbnail frame image (requires cv2) |
+| `POST` | `/api/projects/{id}/analyze` | Trigger highlight analysis with tuning options |
 | `POST` | `/api/projects/{id}/clips/{cid}/transcribe` | Run faster-whisper on candidate |
-| `GET` | `/api/projects/{id}/clips/{cid}/settings` | Load clip editor settings |
-| `POST` | `/api/projects/{id}/clips/{cid}/settings` | Save clip editor settings |
-| `POST` | `/api/projects/{id}/clips/{cid}/render` | FFmpeg render to exports/ |
+| `GET` | `/api/projects/{id}/clips/{cid}/settings` | Load clip editor settings & multi-section timeline |
+| `POST` | `/api/projects/{id}/clips/{cid}/settings` | Save clip editor settings & multi-section timeline |
+| `POST` | `/api/projects/{id}/clips/{cid}/ai-edit-suggestions` | Generate structured AI multi-section narrative edit |
+| `POST` | `/api/projects/{id}/clips/{cid}/render` | Render clip with custom destination path support |
 | `POST` | `/api/exports/{pid}/{cid}/save-dialog` | Open Windows Save As dialog |
 | `POST` | `/api/exports/{pid}/{cid}/save-to-path` | Copy export to user path |
+| `POST` | `/api/system/browse-save-path` | Native Windows Save As file/folder picker dialog |
+| `POST` | `/api/system/open-folder` | Open Windows Explorer with rendered file/folder selected |
 | `POST` | `/api/projects/{id}/cleanup` | Delete source video & audio |
 | `GET` | `/api/ai/config` | Load AI provider config |
 | `POST` | `/api/ai/config` | Save AI provider config |
-| `GET` | `/api/ai/ollama/models` | List local Ollama models |
+| `GET` | `/api/ai/ollama/models` | List local Ollama models with disk/RAM specs |
 | `POST` | `/api/ai/test` | Test AI provider connectivity |
 
 ---

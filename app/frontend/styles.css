@@ -877,3 +877,241 @@ body {
 .export-success-info {
   font-size: 14px;
 }
+
+/* =========================================================================
+   First-Launch AI Modal & Onboarding
+   ========================================================================= */
+.first-launch-modal {
+  max-width: 680px !important;
+}
+.first-launch-badge {
+  background: var(--accent-gold);
+  color: #000;
+  font-weight: 800;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+/* =========================================================================
+   Analysis Config Bar / Drawer on Dashboard
+   ========================================================================= */
+.analysis-options-drawer {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin-top: 14px;
+  text-align: left;
+}
+.options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+
+/* =========================================================================
+   Candidate Card Upgrades
+   ========================================================================= */
+.candidate-card.deselected {
+  opacity: 0.55;
+  filter: grayscale(0.5);
+}
+.card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.candidate-inline-trim {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.candidate-inline-trim input {
+  width: 60px;
+  padding: 2px 6px;
+  font-size: 12px;
+  text-align: center;
+}
+.ai-edit-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-top: 6px;
+}
+
+/* =========================================================================
+   Aspect Ratio & Canvas Preview Controls
+   ========================================================================= */
+.aspect-pill-group {
+  display: inline-flex;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 4px;
+}
+.aspect-pill {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.aspect-pill.active {
+  background: var(--accent);
+  color: #000;
+}
+
+/* =========================================================================
+   Multi-Section Timeline & Time Ruler
+   ========================================================================= */
+.timeline-ruler-container {
+  position: relative;
+  height: 20px;
+  margin-bottom: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  user-select: none;
+}
+.ruler-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.ruler-tick-mark {
+  width: 1px;
+  height: 6px;
+  background: var(--border);
+  margin-top: 2px;
+}
+
+.timeline-sections-track {
+  display: flex;
+  height: 48px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  gap: 4px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+}
+.timeline-section-block {
+  flex: 1;
+  min-width: 80px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  transition: all 0.15s ease;
+  user-select: none;
+  position: relative;
+}
+.timeline-section-block:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.timeline-section-block.active {
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.12);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+}
+.sec-badge-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.sec-layout-tag {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-primary);
+  color: var(--accent);
+}
+.sec-time-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.timeline-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+/* =========================================================================
+   Properties Panel Element Tabs
+   ========================================================================= */
+.prop-tabs {
+  display: flex;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.prop-tab-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.prop-tab-btn.active {
+  background: var(--bg-card);
+  color: var(--text-main);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.color-swatches {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.swatch-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.swatch-btn.active {
+  border-color: #fff;
+  transform: scale(1.15);
+}

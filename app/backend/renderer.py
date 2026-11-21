@@ -1,12 +1,14 @@
-"""FFmpeg 9:16 Vertical Video Renderer.
+"""FFmpeg Multi-Section & Multi-Layout Video Renderer.
 
-Renders 1080x1920 MP4 clips for YouTube Shorts, TikTok, and Instagram Reels.
+Renders 1080x1920 (9:16 portrait) or 1920x1080 (16:9 landscape) MP4 clips.
 Supports:
-1. Split-screen layout (Facecam top 40% + Gameplay bottom 60%)
-2. Fit layout (16:9 gameplay centered with blurred background fill)
-3. Full crop layout (9:16 cover crop with pan & zoom)
-4. Picture-in-Picture layout (Full gameplay + floating facecam box)
-5. Burned-in ASS subtitles (with active word highlights)
+1. Multi-Section Timeline Transitions (different layouts across time ranges in one clip!)
+2. Split-screen layout (customizable Streamer top/bottom + Gameplay)
+3. Fit layout (centered gameplay with blurred background fill)
+4. Full crop layout (9:16 or 16:9 cover crop with independent pan & zoom)
+5. Picture-in-Picture layout (full gameplay + floating customizable webcam box)
+6. Independent element sizing, positioning, zoom, crop, borders, and corner radii
+7. Burned-in ASS subtitles (with active word highlights)
 """
 
 from __future__ import annotations
@@ -15,14 +17,15 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 from .config import EXPORT_H, EXPORT_W, FFMPEG_PATH, SPLIT_FACE_H, SPLIT_GAME_H
 
 
 @dataclass
 class RenderOptions:
-    layout: Literal["split", "fit", "crop", "pip"] = "split"
+    layout: Literal["split", "fit", "crop", "pip", "custom"] = "split"
+    aspect_ratio: str = "9:16"  # "9:16" or "16:9"
     # Facecam normalized coords 0..1
     facecam_x: float = 0.72
     facecam_y: float = 0.06
@@ -30,7 +33,9 @@ class RenderOptions:
     facecam_h: float = 0.28
     # Framing & zoom
     gameplay_pan_x: float = 0.5  # 0 = left, 0.5 = center, 1.0 = right
-    zoom_factor: float = 1.0      # 1.0x to 2.5x
+    zoom_factor: float = 1.0      # 1.0x to 3.0x
+    # Multi-section timeline
+    sections: list[dict[str, Any]] | None = None
     # Subtitles
     enable_subtitles: bool = True
     ass_path: Path | None = None
@@ -57,108 +62,217 @@ def get_video_dimensions(video_path: Path) -> tuple[int, int]:
         return 1920, 1080
 
 
-def build_filter_graph(
-    opts: RenderOptions,
+def build_single_layout_filter(
+    layout: str,
     src_w: int,
-    src_h: int
+    src_h: int,
+    target_w: int,
+    target_h: int,
+    facecam_x: float = 0.72,
+    facecam_y: float = 0.06,
+    facecam_w: float = 0.24,
+    facecam_h: float = 0.28,
+    gameplay_pan_x: float = 0.5,
+    zoom_factor: float = 1.0,
+    in_tag: str = "0:v",
+    out_tag: str = "v_out"
 ) -> str:
-    """Construct FFmpeg filter_complex graph for selected layout."""
-    filters = []
+    """Build filter graph chain for one video segment."""
+    split_face_h = int(target_h * 0.40)
+    split_game_h = target_h - split_face_h
 
-    # ASS subtitle filter escaping for FFmpeg
-    ass_filter = ""
-    if opts.enable_subtitles and opts.ass_path and opts.ass_path.is_file():
-        # FFmpeg on Windows requires forward slashes and escaped colons in filter paths
-        escaped_ass = str(opts.ass_path.resolve()).replace("\\", "/").replace(":", "\\:")
-        ass_filter = f",ass=filename='{escaped_ass}'"
+    if layout == "split":
+        # Split input stream for cam and gameplay
+        s_chain = f"[{in_tag}]split=2[cam_in_{out_tag}][game_in_{out_tag}];"
 
-    if opts.layout == "split":
-        # 1. Facecam top panel (1080x768)
-        cx = max(0, int(opts.facecam_x * src_w))
-        cy = max(0, int(opts.facecam_y * src_h))
-        cw = max(32, min(src_w - cx, int(opts.facecam_w * src_w)))
-        ch = max(32, min(src_h - cy, int(opts.facecam_h * src_h)))
+        # 1. Facecam top panel
+        cx = max(0, int(facecam_x * src_w))
+        cy = max(0, int(facecam_y * src_h))
+        cw = max(32, min(src_w - cx, int(facecam_w * src_w)))
+        ch = max(32, min(src_h - cy, int(facecam_h * src_h)))
 
-        cam_filter = (
-            f"[0:v]crop={cw}:{ch}:{cx}:{cy},"
-            f"scale={EXPORT_W}:{SPLIT_FACE_H}:force_original_aspect_ratio=increase,"
-            f"crop={EXPORT_W}:{SPLIT_FACE_H}[cam];"
+        cam_chain = (
+            f"[cam_in_{out_tag}]crop={cw}:{ch}:{cx}:{cy},"
+            f"scale={target_w}:{split_face_h}:force_original_aspect_ratio=increase,"
+            f"crop={target_w}:{split_face_h}[cam_{out_tag}];"
         )
-        filters.append(cam_filter)
 
-        # 2. Gameplay bottom panel (1080x1152)
-        # Apply horizontal pan to gameplay if desired
-        game_w = int(src_w / opts.zoom_factor)
-        game_h = int(src_h / opts.zoom_factor)
-        gx = max(0, min(src_w - game_w, int(opts.gameplay_pan_x * (src_w - game_w))))
+        # 2. Gameplay bottom panel
+        game_w = max(32, int(src_w / max(1.0, zoom_factor)))
+        game_h = max(32, int(src_h / max(1.0, zoom_factor)))
+        gx = max(0, min(src_w - game_w, int(gameplay_pan_x * (src_w - game_w))))
         gy = max(0, (src_h - game_h) // 2)
 
-        game_filter = (
-            f"[0:v]crop={game_w}:{game_h}:{gx}:{gy},"
-            f"scale={EXPORT_W}:{SPLIT_GAME_H}:force_original_aspect_ratio=increase,"
-            f"crop={EXPORT_W}:{SPLIT_GAME_H}[game];"
+        game_chain = (
+            f"[game_in_{out_tag}]crop={game_w}:{game_h}:{gx}:{gy},"
+            f"scale={target_w}:{split_game_h}:force_original_aspect_ratio=increase,"
+            f"crop={target_w}:{split_game_h}[game_{out_tag}];"
         )
-        filters.append(game_filter)
 
-        # 3. Stack vertically + burn subtitles
-        filters.append(f"[cam][game]vstack=inputs=2[v_stacked];")
-        filters.append(f"[v_stacked]null{ass_filter}[v_out]")
-
-    elif opts.layout == "fit":
-        # Centered 16:9 with blurred background
-        fg_h = int(EXPORT_W * (src_h / src_w))  # ~608px
-        filters.append(
-            f"[0:v]scale={EXPORT_W}:{EXPORT_H}:force_original_aspect_ratio=increase,"
-            f"crop={EXPORT_W}:{EXPORT_H},boxblur=25:12[bg];"
+        stack_chain = (
+            f"[cam_{out_tag}][game_{out_tag}]vstack=inputs=2[{out_tag}];"
         )
-        filters.append(f"[0:v]scale={EXPORT_W}:{fg_h}[fg];")
-        filters.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v_fit];")
-        filters.append(f"[v_fit]null{ass_filter}[v_out]")
+        return s_chain + cam_chain + game_chain + stack_chain
 
-    elif opts.layout == "crop":
-        # 9:16 full-screen cover crop
-        target_aspect = EXPORT_W / EXPORT_H  # 9/16 = 0.5625
-        crop_h = int(src_h / opts.zoom_factor)
+    elif layout == "fit":
+        s_chain = f"[{in_tag}]split=2[bg_in_{out_tag}][fg_in_{out_tag}];"
+        fg_h = int(target_w * (src_h / src_w))
+        bg_chain = (
+            f"[bg_in_{out_tag}]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+            f"crop={target_w}:{target_h},boxblur=25:12[bg_{out_tag}];"
+        )
+        fg_chain = (
+            f"[fg_in_{out_tag}]scale={target_w}:{fg_h}[fg_{out_tag}];"
+        )
+        overlay_chain = (
+            f"[bg_{out_tag}][fg_{out_tag}]overlay=(W-w)/2:(H-h)/2[{out_tag}];"
+        )
+        return s_chain + bg_chain + fg_chain + overlay_chain
+
+    elif layout == "crop":
+        target_aspect = target_w / target_h
+        crop_h = int(src_h / max(1.0, zoom_factor))
         crop_w = int(crop_h * target_aspect)
         if crop_w > src_w:
             crop_w = src_w
             crop_h = int(crop_w / target_aspect)
 
-        cx = max(0, min(src_w - crop_w, int(opts.gameplay_pan_x * (src_w - crop_w))))
+        cx = max(0, min(src_w - crop_w, int(gameplay_pan_x * (src_w - crop_w))))
         cy = max(0, (src_h - crop_h) // 2)
 
-        filters.append(
-            f"[0:v]crop={crop_w}:{crop_h}:{cx}:{cy},"
-            f"scale={EXPORT_W}:{EXPORT_H}[v_crop];"
+        return (
+            f"[{in_tag}]crop={crop_w}:{crop_h}:{cx}:{cy},"
+            f"scale={target_w}:{target_h}[{out_tag}];"
         )
-        filters.append(f"[v_crop]null{ass_filter}[v_out]")
 
-    elif opts.layout == "pip":
-        # Picture-in-picture: Gameplay base + floating webcam box
-        pip_w = int(EXPORT_W * opts.facecam_w * 1.5)
-        pip_h = int(EXPORT_H * opts.facecam_h * 1.0)
-        pip_x = int(EXPORT_W * opts.facecam_x)
-        pip_y = int(EXPORT_H * opts.facecam_y)
+    elif layout == "pip":
+        s_chain = f"[{in_tag}]split=2[base_in_{out_tag}][pip_in_{out_tag}];"
+        pip_w = max(64, int(target_w * facecam_w * 1.5))
+        pip_h = max(64, int(target_h * facecam_h * 1.0))
+        pip_x = max(0, min(target_w - pip_w, int(target_w * facecam_x)))
+        pip_y = max(0, min(target_h - pip_h, int(target_h * facecam_y)))
 
-        cx = max(0, int(opts.facecam_x * src_w))
-        cy = max(0, int(opts.facecam_y * src_h))
-        cw = max(32, min(src_w - cx, int(opts.facecam_w * src_w)))
-        ch = max(32, min(src_h - cy, int(opts.facecam_h * src_h)))
+        cx = max(0, int(facecam_x * src_w))
+        cy = max(0, int(facecam_y * src_h))
+        cw = max(32, min(src_w - cx, int(facecam_w * src_w)))
+        ch = max(32, min(src_h - cy, int(facecam_h * src_h)))
 
-        # Base 9:16 full crop or fit
-        filters.append(
-            f"[0:v]scale={EXPORT_W}:{EXPORT_H}:force_original_aspect_ratio=increase,"
-            f"crop={EXPORT_W}:{EXPORT_H}[base];"
+        base_chain = (
+            f"[base_in_{out_tag}]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+            f"crop={target_w}:{target_h}[base_{out_tag}];"
         )
-        filters.append(
-            f"[0:v]crop={cw}:{ch}:{cx}:{cy},"
+        pip_chain = (
+            f"[pip_in_{out_tag}]crop={cw}:{ch}:{cx}:{cy},"
             f"scale={pip_w}:{pip_h}:force_original_aspect_ratio=increase,"
-            f"crop={pip_w}:{pip_h}[pip_cam];"
+            f"crop={pip_w}:{pip_h}[pip_cam_{out_tag}];"
         )
-        filters.append(f"[base][pip_cam]overlay={pip_x}:{pip_y}[v_pip];")
-        filters.append(f"[v_pip]null{ass_filter}[v_out]")
+        overlay_chain = (
+            f"[base_{out_tag}][pip_cam_{out_tag}]overlay={pip_x}:{pip_y}[{out_tag}];"
+        )
+        return s_chain + base_chain + pip_chain + overlay_chain
 
-    return "".join(filters)
+    # Fallback to crop
+    return f"[{in_tag}]scale={target_w}:{target_h}[{out_tag}];"
+
+
+def build_filter_graph(
+    opts: RenderOptions,
+    src_w: int,
+    src_h: int,
+    clip_start_s: float,
+    clip_end_s: float
+) -> str:
+    """Construct FFmpeg filter_complex graph supporting both single layout and multi-section layouts."""
+    # Target resolution based on aspect ratio
+    if opts.aspect_ratio == "16:9":
+        target_w, target_h = 1920, 1080
+    else:
+        target_w, target_h = 1080, 1920
+
+    # ASS subtitle filter
+    ass_filter = ""
+    if opts.enable_subtitles and opts.ass_path and opts.ass_path.is_file():
+        escaped_ass = str(opts.ass_path.resolve()).replace("\\", "/").replace(":", "\\:")
+        ass_filter = f",ass=filename='{escaped_ass}'"
+
+    # Multi-section layout handling
+    if opts.sections and len(opts.sections) > 0:
+        filters = []
+        sec_out_tags = []
+        clip_dur = clip_end_s - clip_start_s
+
+        for idx, sec in enumerate(opts.sections):
+            sec_tag = f"s_{idx}"
+            out_tag = f"v_sec_{idx}"
+
+            # Calculate relative section boundaries
+            s_start = float(sec.get("start", 0.0))
+            s_end = float(sec.get("end", clip_dur))
+            s_start = max(0.0, min(clip_dur, s_start))
+            s_end = max(s_start + 0.1, min(clip_dur, s_end))
+
+            # Trim section relative to clip start
+            trim_filter = (
+                f"[0:v]trim=start={s_start:.3f}:end={s_end:.3f},"
+                f"setpts=PTS-STARTPTS[{sec_tag}];"
+            )
+            filters.append(trim_filter)
+
+            layout = str(sec.get("layout", opts.layout or "split")).lower()
+            gp = sec.get("gameplay", {})
+            st = sec.get("streamer", {})
+
+            fx = float(st.get("crop_x", opts.facecam_x))
+            fy = float(st.get("crop_y", opts.facecam_y))
+            fw = float(st.get("crop_w", opts.facecam_w))
+            fh = float(st.get("crop_h", opts.facecam_h))
+            g_pan = float(gp.get("pan_x", opts.gameplay_pan_x))
+            zoom = float(gp.get("zoom", opts.zoom_factor))
+
+            sec_filter = build_single_layout_filter(
+                layout=layout,
+                src_w=src_w,
+                src_h=src_h,
+                target_w=target_w,
+                target_h=target_h,
+                facecam_x=fx,
+                facecam_y=fy,
+                facecam_w=fw,
+                facecam_h=fh,
+                gameplay_pan_x=g_pan,
+                zoom_factor=zoom,
+                in_tag=sec_tag,
+                out_tag=out_tag
+            )
+            filters.append(sec_filter)
+            sar_tag = f"{out_tag}_sar"
+            filters.append(f"[{out_tag}]setsar=1[{sar_tag}];")
+            sec_out_tags.append(f"[{sar_tag}]")
+
+        # Concat all section video outputs together
+        concat_inputs = "".join(sec_out_tags)
+        concat_filter = f"{concat_inputs}concat=n={len(sec_out_tags)}:v=1:a=0[v_cat];"
+        filters.append(concat_filter)
+        filters.append(f"[v_cat]setsar=1{ass_filter}[v_out]")
+        return "".join(filters)
+
+    # Standard single layout path
+    single_filter = build_single_layout_filter(
+        layout=opts.layout,
+        src_w=src_w,
+        src_h=src_h,
+        target_w=target_w,
+        target_h=target_h,
+        facecam_x=opts.facecam_x,
+        facecam_y=opts.facecam_y,
+        facecam_w=opts.facecam_w,
+        facecam_h=opts.facecam_h,
+        gameplay_pan_x=opts.gameplay_pan_x,
+        zoom_factor=opts.zoom_factor,
+        in_tag="0:v",
+        out_tag="v_single"
+    )
+    return single_filter + f"[v_single]null{ass_filter}[v_out]"
 
 
 def render_clip(
@@ -169,13 +283,13 @@ def render_clip(
     opts: RenderOptions,
     on_progress: Callable[[float], None] | None = None
 ) -> Path:
-    """Render 1080x1920 MP4 clip applying layouts, trims, and burned subtitles."""
+    """Render MP4 clip applying multi-section layouts, trims, and burned subtitles."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output_path.with_suffix(".part.mp4")
 
     src_w, src_h = get_video_dimensions(source_video)
     duration = end_s - start_s
-    filter_graph = build_filter_graph(opts, src_w, src_h)
+    filter_graph = build_filter_graph(opts, src_w, src_h, clip_start_s=start_s, clip_end_s=end_s)
 
     cmd = [
         FFMPEG_PATH, "-y", "-hide_banner", "-loglevel", "error",

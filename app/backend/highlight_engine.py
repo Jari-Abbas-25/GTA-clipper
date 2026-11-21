@@ -20,7 +20,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
-from .ai_evaluator import evaluate_candidate
+from .ai_evaluator import evaluate_candidate, generate_ai_edit_suggestions
 from .audio_signals import AudioReason, compute_audio_events, compute_loudness_signal, compute_rms_db
 from .chat_signals import ChatReason, compute_chat_signals
 from .config import (
@@ -48,6 +48,7 @@ class HighlightCandidate:
     suggested_title: str = ""
     ai_powered: bool = False
     accepted: bool = True  # Selected for clipping by default
+    edit_suggestions: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -164,10 +165,16 @@ def calculate_clip_window(
 def run_highlight_detection(
     wav_path: Path,
     chat_path: Path | None = None,
-    top_n: int = 15,
-    min_score_threshold: float = 0.25
+    top_n: int = 6,
+    min_score_threshold: float = 0.22,
+    target_count: int | None = None,
+    min_duration: float = DEFAULT_CLIP_MIN,
+    max_duration: float = DEFAULT_CLIP_MAX,
+    sensitivity: str = "medium",
+    focus_mode: str = "all",
+    facecam_region: dict | None = None,
 ) -> DetectionResult:
-    """Full highlight analysis pipeline."""
+    """Full multi-signal highlight analysis & candidate generation pipeline."""
     # 1. Audio analysis
     rms_db, duration_s = compute_rms_db(wav_path)
     loudness_curve, audio_reasons = compute_loudness_signal(rms_db, duration_s)
@@ -179,18 +186,41 @@ def run_highlight_detection(
     if chat_path and chat_path.is_file():
         chat_curve, chat_reasons = compute_chat_signals(chat_path, duration_s)
 
-    # 3. Multi-signal fusion
+    # 3. Focus mode weight adjustments
+    focus = (focus_mode or "all").lower()
+    if focus == "action":
+        weights = {"chat": 0.20, "loudness": 0.45, "events": 0.35}
+    elif focus == "funny":
+        weights = {"chat": 0.45, "loudness": 0.15, "events": 0.40}
+    elif focus == "story":
+        weights = {"chat": 0.35, "loudness": 0.30, "events": 0.35}
+    else:
+        weights = {"chat": 0.40, "loudness": 0.35, "events": 0.25}
+
+    # Multi-signal fusion
     raw_hype, smoothed_hype, active_sigs = fuse_signals(
-        duration_s, chat_curve, loudness_curve, events_curve
+        duration_s, chat_curve, loudness_curve, events_curve, weights=weights
     )
 
-    # 4. Peak picking
-    min_dist_frames = int(min(DEFAULT_MIN_GAP, max(5, duration_s / 5)))
+    # 4. Sensitivity adjustments for peak picking
+    sens = (sensitivity or "medium").lower()
+    if sens == "high":
+        thresh = 0.16
+        min_dist_frames = int(min(22.0, max(4, duration_s / 6)))
+    elif sens == "low":
+        thresh = 0.30
+        min_dist_frames = int(min(45.0, max(5, duration_s / 4)))
+    else:
+        thresh = min_score_threshold
+        min_dist_frames = int(min(DEFAULT_MIN_GAP, max(5, duration_s / 5)))
+
+    effective_top_n = target_count if (target_count and target_count > 0) else top_n
+
     peaks, props = find_peaks(
         smoothed_hype,
-        height=min_score_threshold,
+        height=thresh,
         distance=min_dist_frames,
-        prominence=0.06
+        prominence=0.05
     )
 
     if len(peaks) == 0:
@@ -208,7 +238,10 @@ def run_highlight_detection(
     for p in peaks:
         peak_time = float(p)
         peak_score = float(smoothed_hype[p])
-        start, end = calculate_clip_window(peak_time, smoothed_hype, duration_s)
+        start, end = calculate_clip_window(
+            peak_time, smoothed_hype, duration_s,
+            min_len=min_duration, max_len=max_duration
+        )
 
         # Gather relevant reasons within window
         matched_reasons = []
@@ -256,7 +289,7 @@ def run_highlight_detection(
                     break
         if not overlap:
             final_picks.append(cand)
-            if len(final_picks) >= top_n:
+            if len(final_picks) >= effective_top_n:
                 break
 
     # 7. Rank and evaluate candidates (0..100 relative hype score)
@@ -277,6 +310,16 @@ def run_highlight_detection(
             transcript_text=""
         )
 
+        # Generate structured AI Edit Suggestions for this candidate
+        suggestions = generate_ai_edit_suggestions(
+            start=c["start"],
+            end=c["end"],
+            peak=c["peak"],
+            reasons=c["reasons"],
+            transcript_text="",
+            facecam_region=facecam_region,
+        )
+
         candidates_list.append(HighlightCandidate(
             id=cid,
             rank=rank,
@@ -289,7 +332,8 @@ def run_highlight_detection(
             category=eval_res.category,
             explanation=eval_res.explanation,
             suggested_title=eval_res.suggested_title,
-            ai_powered=eval_res.ai_powered
+            ai_powered=eval_res.ai_powered,
+            edit_suggestions=suggestions,
         ))
 
     # Downsample smoothed hype curve to 1 point per second (or max-pooled if long)

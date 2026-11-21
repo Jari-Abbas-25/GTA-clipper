@@ -50,6 +50,8 @@ except ImportError:
     cv2 = None  # type: ignore
 
 from .ai_evaluator import (
+    OLLAMA_MODEL_SPECS,
+    generate_ai_edit_suggestions,
     get_ollama_status,
     is_ollama_available,
     load_ai_config,
@@ -115,14 +117,24 @@ class CreateProjectRequest(BaseModel):
     title: str | None = None
 
 
+class AnalyzeProjectRequest(BaseModel):
+    target_count: int = 5
+    min_duration: float = 15.0
+    max_duration: float = 60.0
+    sensitivity: str = "medium"  # "low", "medium", "high"
+    focus_mode: str = "all"      # "all", "action", "funny", "story"
+
+
 class SaveClipSettingRequest(BaseModel):
     layout: str = "split"
+    aspect_ratio: str = "9:16"   # "9:16" or "16:9"
     facecam_x: float = 0.72
     facecam_y: float = 0.06
     facecam_w: float = 0.24
     facecam_h: float = 0.28
     gameplay_pan_x: float = 0.5
     zoom_factor: float = 1.0
+    sections: list[dict[str, Any]] | None = None
     start_s: float | None = None
     end_s: float | None = None
     enable_subtitles: bool = True
@@ -134,6 +146,7 @@ class SaveClipSettingRequest(BaseModel):
 
 class RenderClipRequest(BaseModel):
     setting: SaveClipSettingRequest | None = None
+    destination_path: str | None = None
 
 
 class CleanupRequest(BaseModel):
@@ -152,6 +165,7 @@ class AiConfigRequest(BaseModel):
     openrouter_url: str | None = None
     openrouter_model: str | None = None
     openrouter_key: str | None = None
+    configured: bool | None = None
 
 
 class AiTestRequest(BaseModel):
@@ -164,6 +178,10 @@ class AiTestRequest(BaseModel):
 class SaveToPathRequest(BaseModel):
     destination_path: str
     overwrite: bool = False
+
+
+class OpenFolderRequest(BaseModel):
+    path: str
 
 
 # ============================================================================
@@ -205,12 +223,29 @@ def update_ai_configuration(req: AiConfigRequest):
 
 @app.get("/api/ai/ollama/models")
 def list_ollama_models(url: str = Query(None)):
-    """Retrieve installed models from local Ollama instance."""
+    """Retrieve installed models from local Ollama instance with model size and RAM requirements."""
     ok, models, recommended = get_ollama_status(url)
+    detailed_models = []
+    for m in models:
+        spec = OLLAMA_MODEL_SPECS.get(m, {})
+        if not spec:
+            for k, s in OLLAMA_MODEL_SPECS.items():
+                if m.startswith(k):
+                    spec = s
+                    break
+        detailed_models.append({
+            "name": m,
+            "recommended": (m == recommended),
+            "size": spec.get("size", "Unknown"),
+            "ram": spec.get("ram", "~2.5 GB RAM"),
+            "desc": spec.get("desc", ""),
+        })
     return {
         "online": ok,
         "models": models,
+        "model_details": detailed_models,
         "recommended": recommended,
+        "specs": OLLAMA_MODEL_SPECS,
     }
 
 
@@ -398,12 +433,18 @@ def get_project_details(project_id: str):
 
 
 @app.post("/api/projects/{project_id}/analyze")
-def analyze_project(project_id: str, background_tasks: BackgroundTasks):
+def analyze_project(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    req: AnalyzeProjectRequest | None = None,
+):
     proj = Project(project_id)
     if not proj.source_video.is_file():
         raise HTTPException(
             status_code=400, detail="Source video not found. Ensure download is finished."
         )
+
+    options = req or AnalyzeProjectRequest()
 
     meta = proj.load_meta()
     meta["status"] = "analyzing"
@@ -415,35 +456,46 @@ def analyze_project(project_id: str, background_tasks: BackgroundTasks):
         "message": "Extracting 16kHz audio for dynamics analysis...",
     }
 
-    def _analysis_task(p_id: str):
+    def _analysis_task(p_id: str, opts: AnalyzeProjectRequest):
         project = Project(p_id)
         m = project.load_meta()
         try:
             # 1. Extract audio WAV
             extract_audio_wav(project.source_video, project.audio_path)
             _job_progress[p_id] = {
-                "step": "detecting_signals",
-                "percent": 35.0,
-                "message": "Analyzing audio dynamics and chat spikes...",
+                "step": "detecting_facecam",
+                "percent": 25.0,
+                "message": "Detecting streamer webcam framing...",
             }
 
-            # 2. Run multi-signal detection (passes chat if available and has messages)
+            # 2. Detect facecam
+            fc_region = None
+            try:
+                fc_region = detect_facecam(project.source_video, m.get("duration", 60.0))
+                if fc_region:
+                    m["facecam_region"] = asdict(fc_region)
+            except Exception:
+                pass
+
+            _job_progress[p_id] = {
+                "step": "detecting_signals",
+                "percent": 45.0,
+                "message": "Analyzing audio dynamics, chat spikes, and AI candidates...",
+            }
+
+            # 3. Run multi-signal detection
             has_valid_chat = project.chat_path.is_file() and project.chat_path.stat().st_size > 30
             result = run_highlight_detection(
                 wav_path=project.audio_path,
                 chat_path=project.chat_path if has_valid_chat else None,
-                top_n=15,
+                top_n=opts.target_count or 6,
+                target_count=opts.target_count or 5,
+                min_duration=opts.min_duration,
+                max_duration=opts.max_duration,
+                sensitivity=opts.sensitivity,
+                focus_mode=opts.focus_mode,
+                facecam_region=m.get("facecam_region"),
             )
-
-            # 3. Detect facecam
-            _job_progress[p_id] = {
-                "step": "detecting_facecam",
-                "percent": 85.0,
-                "message": "Scanning video frames for streamer webcam...",
-            }
-            fc_region = detect_facecam(project.source_video, result.duration)
-            if fc_region:
-                m["facecam_region"] = asdict(fc_region)
 
             # 4. Save highlights
             highlights_dict = {
@@ -452,6 +504,7 @@ def analyze_project(project_id: str, background_tasks: BackgroundTasks):
                 "reasons_summary": result.reasons_summary,
                 "hype_curve": result.hype_curve,
                 "candidates": [asdict(c) for c in result.candidates],
+                "analysis_options": _model_to_dict(opts),
             }
             project.save_highlights(highlights_dict)
 
@@ -473,7 +526,7 @@ def analyze_project(project_id: str, background_tasks: BackgroundTasks):
                 "message": f"Analysis failed: {err}",
             }
 
-    background_tasks.add_task(_analysis_task, project_id)
+    background_tasks.add_task(_analysis_task, project_id, options)
     return {"message": "Highlight detection started"}
 
 
@@ -609,6 +662,7 @@ def get_clip_setting(project_id: str, clip_id: str):
 
         setting = {
             "layout": "split" if fc else "crop",
+            "aspect_ratio": "9:16",
             "facecam_x": float(fc.get("x", 0.72)),
             "facecam_y": float(fc.get("y", 0.06)),
             "facecam_w": float(fc.get("w", 0.24)),
@@ -623,7 +677,59 @@ def get_clip_setting(project_id: str, clip_id: str):
             "highlight_color": "&H006AB5D9",
             "clip_title": cand.get("suggested_title", "Highlight") if cand else "Highlight",
         }
+
+    # Ensure sections exist (AI edit suggestions populated)
+    if "sections" not in setting or not setting["sections"]:
+        meta = proj.load_meta()
+        highlights = proj.load_highlights() or {}
+        cand = next((c for c in highlights.get("candidates", []) if c["id"] == clip_id), None)
+        fc = meta.get("facecam_region") or {"x": 0.72, "y": 0.06, "w": 0.24, "h": 0.28}
+        if cand and cand.get("edit_suggestions"):
+            setting["sections"] = cand["edit_suggestions"]
+        elif cand:
+            start_val = float(setting.get("start_s", cand["start"]))
+            end_val = float(setting.get("end_s", cand["end"]))
+            peak_val = float(cand.get("peak", start_val + (end_val - start_val) / 2))
+            setting["sections"] = generate_ai_edit_suggestions(
+                start=start_val,
+                end=end_val,
+                peak=peak_val,
+                reasons=cand.get("reasons", []),
+                transcript_text=setting.get("full_text", ""),
+                facecam_region=fc,
+            )
+        proj.save_clip_setting(clip_id, setting)
+
     return setting
+
+
+@app.post("/api/projects/{project_id}/clips/{clip_id}/ai-edit-suggestions")
+def get_or_generate_clip_edit_suggestions(project_id: str, clip_id: str):
+    """Generate or re-generate structured AI multi-section editing arrangement."""
+    proj = Project(project_id)
+    highlights = proj.load_highlights() or {}
+    cand = next((c for c in highlights.get("candidates", []) if c["id"] == clip_id), None)
+    if not cand:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    meta = proj.load_meta()
+    setting = proj.load_clip_setting(clip_id) or {}
+
+    start_s = float(setting.get("start_s", cand["start"]))
+    end_s = float(setting.get("end_s", cand["end"]))
+    fc = meta.get("facecam_region") or {"x": 0.72, "y": 0.06, "w": 0.24, "h": 0.28}
+
+    suggestions = generate_ai_edit_suggestions(
+        start=start_s,
+        end=end_s,
+        peak=float(cand.get("peak", start_s + (end_s - start_s) / 2)),
+        reasons=cand.get("reasons", []),
+        transcript_text=setting.get("full_text", ""),
+        facecam_region=fc,
+    )
+
+    setting["sections"] = suggestions
+    proj.save_clip_setting(clip_id, setting)
+    return {"clip_id": clip_id, "sections": suggestions}
 
 
 @app.post("/api/projects/{project_id}/clips/{clip_id}/settings")
@@ -737,22 +843,25 @@ def trigger_render_clip(
 
     # Configure render options
     raw_layout = str(setting.get("layout", "split")).lower()
-    valid_layouts: tuple[Literal["split", "fit", "crop", "pip"], ...] = (
+    valid_layouts: tuple[Literal["split", "fit", "crop", "pip", "custom"], ...] = (
         "split",
         "fit",
         "crop",
         "pip",
+        "custom",
     )
     chosen_layout: Any = raw_layout if raw_layout in valid_layouts else "split"
 
     opts = RenderOptions(
         layout=chosen_layout,
+        aspect_ratio=str(setting.get("aspect_ratio", "9:16")),
         facecam_x=float(setting.get("facecam_x", 0.72)),
         facecam_y=float(setting.get("facecam_y", 0.06)),
         facecam_w=float(setting.get("facecam_w", 0.24)),
         facecam_h=float(setting.get("facecam_h", 0.28)),
         gameplay_pan_x=float(setting.get("gameplay_pan_x", 0.5)),
         zoom_factor=float(setting.get("zoom_factor", 1.0)),
+        sections=setting.get("sections"),
         enable_subtitles=bool(setting.get("enable_subtitles", True) and ass_path is not None),
         ass_path=ass_path,
     )
@@ -768,11 +877,23 @@ def trigger_render_clip(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Rendering failed: {e}")
 
+    final_path = output_path
+    if req.destination_path and req.destination_path.strip():
+        dest = Path(req.destination_path.strip())
+        if dest.is_dir():
+            dest = dest / output_filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(output_path, dest)
+            final_path = dest
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to copy rendered video to destination: {e}")
+
     return {
         "status": "rendered",
-        "output_path": str(output_path.resolve()),
-        "filename": output_filename,
-        "size_mb": round(output_path.stat().st_size / (1024 * 1024), 2),
+        "output_path": str(final_path.resolve()),
+        "filename": final_path.name,
+        "size_mb": round(final_path.stat().st_size / (1024 * 1024), 2),
     }
 
 
@@ -845,6 +966,60 @@ if dest:
     }
 
 
+@app.post("/api/system/browse-save-path")
+def browse_save_path(default_filename: str = Query("clip.mp4")):
+    """Open Windows native Save As dialog to select export path before or during rendering."""
+    clean_default = Path(default_filename).name or "clip.mp4"
+    script = f"""
+import sys
+import tkinter as tk
+from tkinter import filedialog
+
+root = tk.Tk()
+root.withdraw()
+root.attributes('-topmost', True)
+dest = filedialog.asksaveasfilename(
+    title='Select Export Destination',
+    initialfile={repr(clean_default)},
+    defaultextension='.mp4',
+    filetypes=[('MP4 Video', '*.mp4'), ('All Files', '*.*')]
+)
+root.destroy()
+if dest:
+    sys.stdout.write(dest)
+"""
+    try:
+        proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=90)
+        chosen_dest = proc.stdout.strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to open Save As dialog: {e}")
+
+    if not chosen_dest:
+        return {"cancelled": True, "path": "", "filename": ""}
+
+    return {"cancelled": False, "path": chosen_dest, "filename": Path(chosen_dest).name}
+
+
+@app.post("/api/system/open-folder")
+def open_system_folder(req: OpenFolderRequest):
+    """Open Windows Explorer with the specified file or folder selected."""
+    target = Path(req.path.strip())
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path does not exist on disk")
+
+    if IS_WINDOWS:
+        try:
+            if target.is_file():
+                subprocess.Popen(f'explorer /select,"{str(target.resolve())}"')
+            else:
+                subprocess.Popen(f'explorer "{str(target.resolve())}"')
+            return {"status": "opened", "path": str(target.resolve())}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to open folder: {e}")
+
+    return {"status": "not_supported", "message": "Only supported on Windows desktop"}
+
+
 @app.post("/api/exports/{project_id}/{clip_id}/save-to-path")
 def save_export_to_path(project_id: str, clip_id: str, req: SaveToPathRequest):
     """Save rendered clip to an explicitly provided file path."""
@@ -882,6 +1057,60 @@ def save_export_to_path(project_id: str, clip_id: str, req: SaveToPathRequest):
         "filename": dest_path.name,
         "size_mb": round(dest_path.stat().st_size / (1024 * 1024), 2),
     }
+
+
+@app.post("/api/system/browse-save-path")
+def browse_save_path(default_filename: str = Query("clip.mp4")):
+    """Open Windows native Save As dialog to select export path before or during rendering."""
+    clean_default = Path(default_filename).name or "clip.mp4"
+    script = f"""
+import sys
+import tkinter as tk
+from tkinter import filedialog
+
+root = tk.Tk()
+root.withdraw()
+root.attributes('-topmost', True)
+dest = filedialog.asksaveasfilename(
+    title='Select Export Destination',
+    initialfile={repr(clean_default)},
+    defaultextension='.mp4',
+    filetypes=[('MP4 Video', '*.mp4'), ('All Files', '*.*')]
+)
+root.destroy()
+if dest:
+    sys.stdout.write(dest)
+"""
+    try:
+        proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=90)
+        chosen_dest = proc.stdout.strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to open Save As dialog: {e}")
+
+    if not chosen_dest:
+        return {"cancelled": True, "path": "", "filename": ""}
+
+    return {"cancelled": False, "path": chosen_dest, "filename": Path(chosen_dest).name}
+
+
+@app.post("/api/system/open-folder")
+def open_system_folder(req: OpenFolderRequest):
+    """Open Windows Explorer with the specified file or folder selected."""
+    target = Path(req.path.strip())
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path does not exist on disk")
+
+    if IS_WINDOWS:
+        try:
+            if target.is_file():
+                subprocess.Popen(f'explorer /select,"{str(target.resolve())}"')
+            else:
+                subprocess.Popen(f'explorer "{str(target.resolve())}"')
+            return {"status": "opened", "path": str(target.resolve())}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to open folder: {e}")
+
+    return {"status": "not_supported", "message": "Only supported on Windows desktop"}
 
 
 @app.post("/api/projects/{project_id}/cleanup")

@@ -8,35 +8,37 @@ A **100% free, zero-cost, locally running** desktop application that finds genui
 
 ## ✨ Features
 
-### Multi-Platform Support
+### First-Launch AI Onboarding
+- Guided configuration modal before URL input
+- **Option A (Local AI)**: Auto-detects local Ollama server, lists installed models with disk sizes and RAM specs (e.g. `llama3.2:3b` ~2.0GB / ~2.8GB RAM, `qwen2.5:3b`), plus zero-cost heuristic fallback
+- **Option B (Cloud AI)**: DeepSeek (`deepseek-chat`) and OpenRouter support with masked keys and live connection verification
+
+### Multi-Platform Ingestion
 - **Twitch VODs** — downloads video + full timestamped chat replay (Twitch GraphQL)
 - **YouTube** — downloads video + live chat (archived livestreams with replay enabled)
 - **Local files** — drag and drop any MP4/MKV file (optional `.chat.json` sidecar)
 
-### Multi-Signal Highlight Detection
+### Real AI Highlight Detection & Tuning
+- 🎛️ **Analysis Tuning**: Set target highlight count (4–6+), sensitivity (low/medium/high), and focus mode (all/action/funny/story)
 - 📊 **Chat velocity spikes** — rolling baseline analysis, 18× surge detection
 - 🎧 **Audio dynamics** — sudden loudness jumps (+12 dB to +28 dB above baseline)
 - 😂 **Audio event tagging** — laughter, shouting, cheering via CED-mini ONNX
 - 🗣️ **Speech recognition** — faster-whisper INT8 on candidate windows only (saves 90% CPU)
-- 🤖 **Local AI ranking** — Ollama (llama3.2:3b / qwen2.5:3b) with heuristic fallback
+- 🤖 **Local/API AI evaluation** — contextual clip titles and hype scoring
 
-### 9:16 Canvas Editor
-- 4 layout modes: **Split-Screen**, **Full Crop**, **Blurred Fit**, **Picture-in-Picture**
-- Drag & resize the **facecam bounding box** directly on the canvas
-- TikTok-style **word-by-word subtitle preview**
-- **Timeline scrubber** with ±1s nudge trimming
-- All edits **auto-saved per clip** — reopen without losing progress
+### Full Manual & AI-Assisted Video Editor
+- 📐 **Aspect Ratio Switcher**: One-click toggling between **9:16 Portrait** (1080×1920) and **16:9 Landscape** (1920×1080)
+- ⚡ **AI Edit Suggestions**: Auto-generates narrative transitions (Intro gameplay → Peak streamer reaction → Action zoom → Outro fit)
+- 🎞️ **Multi-Section Timeline**: Time ruler, color-coded section blocks, playhead tracking, "Split Section" at playhead, and boundary trimming
+- 🎮 **Independent Gameplay Controls**: Zoom 1x–3x, pan X/Y, pos Y, border width/colors, corner radius
+- 🎙️ **Independent Streamer Controls**: Enable/disable, crop framing, zoom 1x–2.5x, interactive canvas drag & resize handles, borders, corner radius
+- 💬 **TikTok-Style Subtitles**: Real-time word-by-word highlighted preview with customizable styles
 
-### Export
-- 1080×1920 MP4 (libx264 + AAC, burned-in subtitles)
-- Native **Windows Save As dialog** to save anywhere
-- One-click **storage cleanup** — delete source VOD after exporting, keep clips
-
-### AI Provider Options
-- **Ollama** (fully local, free) — recommended
-- **DeepSeek API** (free tier available)
-- **OpenRouter** (pay-per-use, many models)
-- **Heuristics** (always works, no setup required)
+### Export & Destination Handling
+- 1080×1920 portrait or 1920×1080 landscape MP4 (libx264 + AAC, burned-in subtitles)
+- **Save Anywhere**: Choose custom output destination outside application directory
+- Native **Windows Save As dialog** and **Open Containing Folder** in Windows Explorer
+- One-click **storage cleanup** — delete source VOD after exporting, keep finished clips
 
 ---
 
