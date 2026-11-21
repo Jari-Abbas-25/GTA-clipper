@@ -307,9 +307,11 @@
                   <input type="number" id="trimStartInput" class="text-input" step="0.5" style="width: 80px;">
                   <span>to</span>
                   <input type="number" id="trimEndInput" class="text-input" step="0.5" style="width: 80px;">
-                  <div class="nudge-buttons">
-                    <button class="btn btn-sm" id="btnNudgeStartMinus1">-1s</button>
-                    <button class="btn btn-sm" id="btnNudgeEndPlus1">+1s</button>
+                  <div class="nudge-buttons" style="display: flex; gap: 4px;">
+                    <button class="btn btn-sm" id="btnNudgeStartMinus1" title="Start -1s">-1s</button>
+                    <button class="btn btn-sm" id="btnNudgeStartPlus1" title="Start +1s">+1s</button>
+                    <button class="btn btn-sm" id="btnNudgeEndMinus1" title="End -1s">-1s</button>
+                    <button class="btn btn-sm" id="btnNudgeEndPlus1" title="End +1s">+1s</button>
                   </div>
                 </div>
               </div>
@@ -588,6 +590,7 @@
           <div style="margin-bottom: 12px;">
             <label class="field-label">Model Name:</label>
             <input type="text" id="aiApiModelInput" class="text-input" value="deepseek-chat" style="width: 100%;">
+            <div id="apiModelHint" style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">Default: <code>deepseek-chat</code></div>
           </div>
 
           <div style="margin-bottom: 16px;">

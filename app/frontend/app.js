@@ -27,8 +27,9 @@ class AppController {
     await this.loadAiConfig();
     await this.loadDashboardProjects();
 
-    // Check First-Launch AI Setup: if not configured, show initial setup modal BEFORE anything else
-    if (!this.aiConfig || !this.aiConfig.configured) {
+    // Check First-Launch AI Setup: show modal unless BOTH server config AND localStorage confirm setup done
+    const hasSeenSetup = localStorage.getItem('gta_clipper_ai_configured');
+    if (!hasSeenSetup || !this.aiConfig || !this.aiConfig.configured) {
       this.openFirstLaunchModal();
     }
   }
@@ -197,6 +198,7 @@ class AppController {
       });
       const data = await res.json();
       this.aiConfig = data.config;
+      localStorage.setItem('gta_clipper_ai_configured', '1');
       document.getElementById('aiFirstLaunchModal').classList.remove('active');
       this.updateAiHeaderPill(data.config.mode, data.config.provider, data.config.ollama_model);
       alert('AI Configuration complete! You can now paste your VOD or YouTube URL.');
@@ -244,9 +246,14 @@ class AppController {
                 </div>
               </div>
             </div>
-            <button class="btn btn-sm btn-primary btn-open-dash-proj" data-id="${p.id}">
-              Open Highlights →
-            </button>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button class="btn btn-sm btn-primary btn-open-dash-proj" data-id="${p.id}">
+                Open Highlights →
+              </button>
+              <button class="btn btn-sm btn-danger btn-delete-dash-proj" data-id="${p.id}" title="Delete project" style="background:var(--accent-red,#e74c3c);color:#fff;border:none;">
+                🗑️ Delete
+              </button>
+            </div>
           </div>
         `;
       }).join('');
@@ -254,9 +261,27 @@ class AppController {
       container.querySelectorAll('.btn-open-dash-proj').forEach(btn => {
         btn.addEventListener('click', () => this.loadProject(btn.dataset.id));
       });
+      container.querySelectorAll('.btn-delete-dash-proj').forEach(btn => {
+        btn.addEventListener('click', () => this.deleteProject(btn.dataset.id));
+      });
 
     } catch (e) {
       container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">Failed to load project list.</div>';
+    }
+  }
+
+  async deleteProject(projectId) {
+    if (!confirm('Delete this project? The source video and all cached data will be removed. Exported clips already saved elsewhere are NOT deleted.')) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        this.loadDashboardProjects();
+      } else {
+        alert('Delete failed: ' + (data.detail || data.error || 'Unknown error'));
+      }
+    } catch (e) {
+      alert('Delete error: ' + e.message);
     }
   }
 
@@ -1498,6 +1523,8 @@ class AppController {
         body: JSON.stringify(payload)
       });
       const data = await res.json();
+      this.aiConfig = data.config;
+      localStorage.setItem('gta_clipper_ai_configured', '1');
       alert('AI Configuration saved successfully!');
       document.getElementById('aiSettingsModal').classList.remove('active');
       this.updateAiHeaderPill(data.config.mode, data.config.provider, data.config.ollama_model);

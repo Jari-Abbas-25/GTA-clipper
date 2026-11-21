@@ -1123,6 +1123,23 @@ def cleanup_project_storage(project_id: str, req: CleanupRequest | None = None):
     return res
 
 
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: str):
+    """Permanently delete a project folder and all its cached data."""
+    import shutil
+    proj = Project(project_id)
+    if not proj.dir.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        shutil.rmtree(proj.dir, ignore_errors=True)
+        # Also remove empty export dir if present and empty
+        if proj.export_dir.exists() and not any(proj.export_dir.iterdir()):
+            proj.export_dir.rmdir()
+        return {"success": True, "deleted": project_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
+
+
 @app.get("/api/exports/{project_id}/{filename}")
 def download_export_clip(project_id: str, filename: str, download: bool = False):
     proj = Project(project_id)
